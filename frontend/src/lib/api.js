@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// In production, frontend is served from same origin as backend
+// Use empty string to make requests to same origin, or use env variable if set
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 export const API_BASE = `${BACKEND_URL}/api`;
 
 const api = axios.create({
