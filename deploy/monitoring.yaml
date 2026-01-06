@@ -1,0 +1,54 @@
+# Basic monitoring setup for cost tracking
+
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: pos-app-metrics
+  namespace: pos-system
+  labels:
+    app: pos-app
+spec:
+  selector:
+    matchLabels:
+      app: pos-app
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+
+---
+# Pod Disruption Budget for availability during cost optimization
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pos-app-pdb
+  namespace: pos-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pos-app
+
+---
+# Vertical Pod Autoscaler (VPA) for right-sizing
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: pos-app-vpa
+  namespace: pos-system
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pos-app
+  updatePolicy:
+    updateMode: "Off"  # Recommendation only, no automatic updates
+  resourcePolicy:
+    containerPolicies:
+    - containerName: pos-app
+      maxAllowed:
+        cpu: 1
+        memory: 1Gi
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi

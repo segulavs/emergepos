@@ -1,0 +1,66 @@
+# Cost optimization configurations for AKS
+
+# Resource Quotas to prevent cost overruns
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: pos-system-quota
+  namespace: pos-system
+spec:
+  hard:
+    requests.cpu: "2"      # Total CPU requests
+    requests.memory: 4Gi   # Total memory requests
+    limits.cpu: "4"        # Total CPU limits
+    limits.memory: 8Gi     # Total memory limits
+    persistentvolumeclaims: "3"  # Max PVCs
+    pods: "10"             # Max pods
+    services: "5"          # Max services
+
+---
+# Limit Range for individual pods
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pos-system-limits
+  namespace: pos-system
+spec:
+  limits:
+  - default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "250m"
+      memory: "256Mi"
+    type: Container
+
+---
+# Network Policy for security (reduces attack surface)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pos-system-netpol
+  namespace: pos-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - podSelector: {}
+  egress:
+  - to:
+    - podSelector: {}
+  - to: []  # Allow external traffic (for MongoDB, etc.)
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: pos-system
+data:
+  DB_NAME: "pos_system"
+  CORS_ORIGINS: "*"
+  # MongoDB connection will be constructed from service name
+  MONGO_HOST: "mongodb-service"
+  MONGO_PORT: "27017"

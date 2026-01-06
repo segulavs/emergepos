@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pos-system-dev
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pos-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: pos-app
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+        env:
+        - name: ENVIRONMENT
+          value: "development"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+spec:
+  template:
+    spec:
+      containers:
+      - name: mongodb
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+spec:
+  resources:
+    requests:
+      storage: 5Gi  # Smaller storage for dev
