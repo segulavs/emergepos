@@ -2,6 +2,10 @@
 
 This guide will help you deploy EmergePOS to [Railway.com](https://railway.com).
 
+## ⚠️ IMPORTANT: Set Environment Variables BEFORE Deploying!
+
+The application **WILL NOT START** without the `MONGO_URL` environment variable configured. Set this first!
+
 ## Prerequisites
 
 - A Railway.com account
@@ -10,7 +14,22 @@ This guide will help you deploy EmergePOS to [Railway.com](https://railway.com).
 
 ## Quick Deploy
 
-### Option 1: Deploy with Railway CLI
+### Step 1: Set Up MongoDB First!
+
+**Option A: MongoDB Atlas (Recommended)**
+1. Create free account at [MongoDB Atlas](https://www.mongodb.com/atlas)
+2. Create a cluster (M0 free tier works)
+3. Create a database user with password
+4. Go to Network Access → Add IP Address → "Allow Access from Anywhere" (0.0.0.0/0)
+5. Get connection string from Connect → Drivers
+
+**Option B: Railway MongoDB Plugin**
+1. In Railway, click "New" → "Database" → "MongoDB"
+2. Copy the connection string from the Variables tab
+
+### Step 2: Deploy to Railway
+
+#### Using Railway CLI:
 
 ```bash
 # Install Railway CLI
@@ -22,24 +41,27 @@ railway login
 # Initialize new project
 railway init
 
-# Add MongoDB plugin (optional - can use MongoDB Atlas instead)
-railway add --plugin mongodb
+# SET ENVIRONMENT VARIABLES FIRST!
+railway variables set MONGO_URL="mongodb+srv://user:password@cluster.mongodb.net/pos_system"
+railway variables set JWT_SECRET="$(openssl rand -hex 32)"
 
 # Deploy
 railway up
 ```
 
-### Option 2: Deploy via Railway Dashboard
+#### Using Railway Dashboard:
 
 1. Go to [Railway Dashboard](https://railway.app/dashboard)
-2. Click **"New Project"**
-3. Select **"Deploy from GitHub repo"**
-4. Choose this repository
-5. Railway will automatically detect the `railway.toml` and `Dockerfile.railway`
+2. Click **"New Project"** → **"Deploy from GitHub repo"**
+3. Choose this repository
+4. **BEFORE deploying**, go to **Variables** tab and add:
+   - `MONGO_URL` = your MongoDB connection string
+   - `JWT_SECRET` = a secure random string
+5. Redeploy
 
 ## Environment Variables
 
-Configure these environment variables in Railway:
+Configure these environment variables in Railway **BEFORE** deploying:
 
 ### Required Variables
 

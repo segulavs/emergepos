@@ -20,8 +20,17 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+mongo_url = os.environ.get('MONGO_URL')
+if not mongo_url:
+    print("=" * 60)
+    print("ERROR: MONGO_URL environment variable is not set!")
+    print("Please set MONGO_URL to your MongoDB connection string.")
+    print("Example: mongodb+srv://user:pass@cluster.mongodb.net/pos_system")
+    print("=" * 60)
+    # Use a placeholder that will fail gracefully on first DB access
+    mongo_url = "mongodb://localhost:27017/pos_system"
+
+client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
 db = client[os.environ.get('DB_NAME', 'pos_system')]
 
 # JWT Configuration
@@ -3545,8 +3554,17 @@ async def admin_get_platform_stats(
 @api_router.get("/health")
 async def health_check():
     """Health check endpoint"""
+    db_status = "unknown"
+    try:
+        # Check MongoDB connection
+        await client.admin.command('ping')
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)[:50]}"
+    
     return {
         "status": "healthy",
+        "database": db_status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "1.0.0"
     }
@@ -3591,6 +3609,21 @@ if STATIC_DIR.exists():
 @app.on_event("startup")
 async def startup_db_client():
     """Create indexes on startup"""
+    logger.info("=" * 60)
+    logger.info("EmergePOS Server Starting...")
+    logger.info(f"Port: {os.environ.get('PORT', '8000')}")
+    logger.info(f"Database: {os.environ.get('DB_NAME', 'pos_system')}")
+    logger.info(f"MONGO_URL configured: {'Yes' if os.environ.get('MONGO_URL') else 'NO - MISSING!'}")
+    logger.info("=" * 60)
+    
+    try:
+        # Test MongoDB connection
+        await client.admin.command('ping')
+        logger.info("✓ MongoDB connection successful")
+    except Exception as e:
+        logger.error(f"✗ MongoDB connection failed: {e}")
+        logger.error("The server will start but database operations will fail")
+    
     try:
         # Users indexes
         await db.users.create_index("email", unique=True)
