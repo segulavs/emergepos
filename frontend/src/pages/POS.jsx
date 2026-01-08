@@ -244,6 +244,7 @@ export function POS() {
       product_id: product.id,
       product_name: product.name,
       sku: product.sku,
+      brand: product.brand || '',
       unit_price: price,
       quantity: 1,
       tax_type: product.tax_type || 'standard',
@@ -307,6 +308,7 @@ export function POS() {
           brand: item.brand || '',
           quantity: item.quantity,
           unit_price: item.unit_price,
+          discount_amount: item.discount_amount || 0,
           discount: item.discount || 0,
           tax_type: item.tax_type || 'standard'
         })),
@@ -322,13 +324,17 @@ export function POS() {
 
       if (isOnline) {
         const response = await transactionAPI.create(selectedStore.id, transactionData);
-        // Ensure items have brand field
+        // Ensure items have brand field from cart items
         const receiptData = {
           ...response.data,
-          items: (response.data.items || []).map(item => ({
-            ...item,
-            brand: item.brand || cart.items.find(ci => ci.product_id === item.product_id)?.brand || 'N/A'
-          })),
+          items: (response.data.items || []).map(item => {
+            // Find matching cart item to preserve brand
+            const cartItem = cart.items.find(ci => ci.product_id === item.product_id);
+            return {
+              ...item,
+              brand: item.brand || cartItem?.brand || ''
+            };
+          }),
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim()
         };
@@ -346,7 +352,7 @@ export function POS() {
           receipt_number: `OFF-${Date.now()}`,
           items: cart.items.map(item => ({
             ...item,
-            brand: item.brand || 'N/A'
+            brand: item.brand || ''
           })),
           total: cart.getTotal(),
           customer_name: customerName.trim(),
