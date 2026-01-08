@@ -15,8 +15,11 @@ const COMMANDS = {
   DOUBLE_HEIGHT: GS + '!' + '\x01',   // Double height
   NORMAL_SIZE: GS + '!' + '\x00',     // Normal size
   CUT_PAPER: GS + 'V' + '\x00',       // Cut paper
-  FEED_LINE: '\n',
-  FEED_LINES: (n) => ESC + 'd' + String.fromCharCode(n),
+  FEED_LINE: '\n',                    // Line feed
+  FEED_LINES: (n) => ESC + 'd' + String.fromCharCode(n), // Feed n lines
+  LF: '\x0A',                         // Line Feed (LF) - ESC/POS standard
+  CR: '\x0D',                         // Carriage Return (CR)
+  CRLF: '\x0D\x0A',                   // CR+LF for compatibility
 };
 
 // Printer connection state
@@ -130,70 +133,79 @@ export const formatThermalReceipt = (receipt, settings = {}) => {
   // Store Header
   output += COMMANDS.ALIGN_CENTER;
   output += COMMANDS.DOUBLE_HEIGHT;
-  output += (settings.storeName || 'Store') + '\n';
+  output += (settings.storeName || 'Store') + COMMANDS.CRLF;
   output += COMMANDS.NORMAL_SIZE;
   if (settings.storeAddress) {
-    output += settings.storeAddress + '\n';
+    output += settings.storeAddress + COMMANDS.CRLF;
   }
-  output += '\n';
+  output += COMMANDS.CRLF;
   
   // Receipt Info
   output += COMMANDS.ALIGN_LEFT;
-  output += `Receipt: ${receipt.receipt_number}\n`;
-  output += `Date: ${new Date(receipt.created_at).toLocaleString()}\n`;
+  output += `Receipt: ${receipt.receipt_number}` + COMMANDS.CRLF;
+  output += `Date: ${new Date(receipt.created_at).toLocaleString()}` + COMMANDS.CRLF;
   if (receipt.cashier_name) {
-    output += `Cashier: ${receipt.cashier_name}\n`;
+    output += `Cashier: ${receipt.cashier_name}` + COMMANDS.CRLF;
   }
-  output += '\n';
+  output += COMMANDS.CRLF;
   
   // Customer Info
   if (receipt.customer_name) {
     output += COMMANDS.BOLD_ON;
-    output += `Customer: ${receipt.customer_name}\n`;
+    output += `Customer: ${receipt.customer_name}` + COMMANDS.CRLF;
     output += COMMANDS.BOLD_OFF;
     if (receipt.customer_phone) {
-      output += `Phone: ${receipt.customer_phone}\n`;
+      output += `Phone: ${receipt.customer_phone}` + COMMANDS.CRLF;
     }
-    output += '\n';
+    output += COMMANDS.CRLF;
   }
   
   // Separator
-  output += '-'.repeat(32) + '\n';
+  output += '-'.repeat(32) + COMMANDS.CRLF;
   
-  // Items
+  // Items - ESC/POS compatible formatting
   for (const item of receipt.items || []) {
     const itemTotal = item.line_total || (item.quantity * item.unit_price);
-    output += `${item.product_name}\n`;
-    output += `  ${item.quantity} x ${formatCurrency(item.unit_price)}`;
-    output += COMMANDS.ALIGN_RIGHT;
-    output += formatCurrency(itemTotal) + '\n';
+    // Ensure left alignment for items
     output += COMMANDS.ALIGN_LEFT;
+    // First row: description, unit price, quantity, total price
+    output += `${item.product_name} ${formatCurrency(item.unit_price)} x${item.quantity} ${formatCurrency(itemTotal)}`;
+    output += COMMANDS.CRLF; // Use CR+LF for ESC/POS compatibility
+    
+    // Second row: brand (always show, even if empty)
+    // Ensure brand is always displayed on second line with proper ESC/POS formatting
+    const brandValue = (item.brand !== undefined && item.brand !== null && String(item.brand).trim() !== '') 
+      ? String(item.brand).trim() 
+      : 'N/A';
+    output += `  Brand: ${brandValue}`;
+    output += COMMANDS.CRLF; // Use CR+LF for ESC/POS compatibility
+    output += COMMANDS.FEED_LINE; // Additional line feed for spacing
   }
   
   // Separator
-  output += '-'.repeat(32) + '\n';
+  output += '-'.repeat(32) + COMMANDS.CRLF;
   
   // Totals
   output += COMMANDS.BOLD_ON;
   const total = receipt.total || receipt.items?.reduce((sum, i) => sum + (i.line_total || i.quantity * i.unit_price), 0) || 0;
-  output += `TOTAL: ${formatCurrency(total).padStart(25)}\n`;
+  output += `TOTAL: ${formatCurrency(total).padStart(25)}` + COMMANDS.CRLF;
   output += COMMANDS.BOLD_OFF;
   
   // Payment
   if (receipt.payments && receipt.payments.length > 0) {
     const payment = receipt.payments[0];
-    output += `Paid (${payment.method.toUpperCase()}): ${formatCurrency(payment.amount).padStart(18)}\n`;
+    output += `Paid (${payment.method.toUpperCase()}): ${formatCurrency(payment.amount).padStart(18)}` + COMMANDS.CRLF;
     if (payment.amount > total) {
-      output += `Change: ${formatCurrency(payment.amount - total).padStart(24)}\n`;
+      output += `Change: ${formatCurrency(payment.amount - total).padStart(24)}` + COMMANDS.CRLF;
     }
   }
   
-  output += '\n';
+  output += COMMANDS.CRLF;
   
   // Footer
   output += COMMANDS.ALIGN_CENTER;
-  output += 'Thank you for your purchase!\n';
-  output += '\n\n\n';
+  output += 'Thank you for your purchase!' + COMMANDS.CRLF;
+  output += COMMANDS.CRLF + COMMANDS.CRLF + COMMANDS.CRLF;
   
   // Cut paper
   output += COMMANDS.CUT_PAPER;
@@ -207,6 +219,8 @@ export const printReceipt = async (receipt, settings = {}) => {
     case 'usb':
       try {
         const formatted = formatThermalReceipt(receipt, settings);
+        // Debug: log formatted output to verify brand lines are included
+        console.log('Thermal receipt formatted output (first 500 chars):', formatted.substring(0, 500));
         await sendToUSBPrinter(formatted);
         return { success: true, method: 'usb' };
       } catch (error) {
@@ -293,10 +307,11 @@ export const generateReceiptHTML = (receipt, settings = {}) => {
         <div class="separator"></div>
       ` : ''}
       ${(receipt.items || []).map(item => `
-        <div>${item.product_name}</div>
         <div class="item">
-          <span class="item-detail">${item.quantity} x ${formatCurrency(item.unit_price)}</span>
-          <span>${formatCurrency(item.line_total || item.quantity * item.unit_price)}</span>
+          <div>
+            <div>${item.product_name} ${formatCurrency(item.unit_price)} x${item.quantity} ${formatCurrency(item.line_total || item.quantity * item.unit_price)}</div>
+            <div class="item-detail">Brand: ${item.brand || 'N/A'}</div>
+          </div>
         </div>
       `).join('')}
       <div class="separator"></div>

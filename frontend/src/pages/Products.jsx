@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuthStore, useOrgStore } from '@/lib/store';
 import { productAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -55,29 +55,33 @@ export function Products() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [formData, setFormData] = useState(initialFormData);
   const [saving, setSaving] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   const currencySymbol = organization?.settings?.currency_symbol || 'K';
   const canEdit = ['super_admin', 'org_admin', 'store_admin'].includes(user?.role);
 
-  useEffect(() => {
-    loadProducts();
-  }, []);
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async (searchTerm = '') => {
     setLoading(true);
     try {
-      const response = await productAPI.getAll({ search: search || undefined });
+      const response = await productAPI.getAll({ search: searchTerm || undefined });
       setProducts(response.data);
     } catch (error) {
       toast.error('Failed to load products');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
 
   const handleSearch = (e) => {
     e.preventDefault();
-    loadProducts();
+    loadProducts(search);
   };
 
   const openCreateDialog = () => {
@@ -153,9 +157,36 @@ export function Products() {
           <p className="text-slate-500">Manage your product catalog</p>
         </div>
         {canEdit && (
-          <Button onClick={openCreateDialog} className="bg-emerald-600 hover:bg-emerald-700">
-            + Add Product
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              onClick={async () => {
+                setDownloadingTemplate(true);
+                try {
+                  await productAPI.downloadTemplate();
+                  toast.success('Template downloaded successfully!');
+                } catch (error) {
+                  toast.error(error.message || 'Failed to download template');
+                } finally {
+                  setDownloadingTemplate(false);
+                }
+              }}
+              variant="outline"
+              className="border-blue-600 text-blue-600 hover:bg-blue-50"
+              disabled={downloadingTemplate}
+            >
+              {downloadingTemplate ? 'Downloading...' : '📥 Download Template'}
+            </Button>
+            <Button 
+              onClick={() => setShowImportDialog(true)} 
+              variant="outline"
+              className="border-green-600 text-green-600 hover:bg-green-50"
+            >
+              📤 Import Excel
+            </Button>
+            <Button onClick={openCreateDialog} className="bg-emerald-600 hover:bg-emerald-700">
+              + Add Product
+            </Button>
+          </div>
         )}
       </div>
 
@@ -419,6 +450,112 @@ export function Products() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Excel Dialog */}
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import Products from Excel</DialogTitle>
+            <DialogDescription>
+              Upload an Excel file to import products. Make sure to use the template format.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {!importResult ? (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="excel-file">Select Excel File</Label>
+                <Input
+                  id="excel-file"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
+                    setImporting(true);
+                    try {
+                      const result = await productAPI.importFromExcel(file);
+                      setImportResult(result);
+                      if (result.errors && result.errors.length > 0) {
+                        toast.warning(`Import completed with ${result.errors.length} errors`);
+                      } else {
+                        toast.success(`Successfully imported ${result.created} products and updated ${result.updated} products`);
+                      }
+                      loadProducts();
+                    } catch (error) {
+                      toast.error(error.detail || error.message || 'Failed to import products');
+                    } finally {
+                      setImporting(false);
+                    }
+                  }}
+                  disabled={importing}
+                />
+                <p className="text-xs text-slate-500">
+                  Supported formats: .xlsx, .xls
+                </p>
+              </div>
+              
+              {importing && (
+                <div className="text-center py-4">
+                  <p className="text-slate-600">Processing file...</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4 py-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 className="font-semibold text-green-800 mb-2">Import Summary</h4>
+                <div className="space-y-1 text-sm">
+                  <p><span className="font-medium">Created:</span> {importResult.created} products</p>
+                  <p><span className="font-medium">Updated:</span> {importResult.updated} products</p>
+                  <p><span className="font-medium">Total Processed:</span> {importResult.total_processed} products</p>
+                </div>
+              </div>
+              
+              {importResult.errors && importResult.errors.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-h-60 overflow-y-auto">
+                  <h4 className="font-semibold text-red-800 mb-2">Errors ({importResult.errors.length})</h4>
+                  <ul className="text-sm text-red-700 space-y-1">
+                    {importResult.errors.map((error, idx) => (
+                      <li key={idx} className="text-xs">• {error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => {
+                setShowImportDialog(false);
+                setImportResult(null);
+                // Reset file input
+                const fileInput = document.getElementById('excel-file');
+                if (fileInput) fileInput.value = '';
+              }}
+            >
+              {importResult ? 'Close' : 'Cancel'}
+            </Button>
+            {importResult && (
+              <Button 
+                type="button"
+                onClick={() => {
+                  setImportResult(null);
+                  const fileInput = document.getElementById('excel-file');
+                  if (fileInput) fileInput.value = '';
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                Import Another
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

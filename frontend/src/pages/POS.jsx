@@ -304,6 +304,7 @@ export function POS() {
           product_id: item.product_id,
           product_name: item.product_name,
           sku: item.sku,
+          brand: item.brand || '',
           quantity: item.quantity,
           unit_price: item.unit_price,
           discount: item.discount || 0,
@@ -321,11 +322,17 @@ export function POS() {
 
       if (isOnline) {
         const response = await transactionAPI.create(selectedStore.id, transactionData);
-        setLastReceipt({
+        // Ensure items have brand field
+        const receiptData = {
           ...response.data,
+          items: (response.data.items || []).map(item => ({
+            ...item,
+            brand: item.brand || cart.items.find(ci => ci.product_id === item.product_id)?.brand || 'N/A'
+          })),
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim()
-        });
+        };
+        setLastReceipt(receiptData);
         setShowReceipt(true);
       } else {
         addPendingTransaction({
@@ -337,7 +344,10 @@ export function POS() {
         setShowReceipt(true);
         setLastReceipt({
           receipt_number: `OFF-${Date.now()}`,
-          items: cart.items,
+          items: cart.items.map(item => ({
+            ...item,
+            brand: item.brand || 'N/A'
+          })),
           total: cart.getTotal(),
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim(),
@@ -578,9 +588,13 @@ export function POS() {
         
         ${lastCreditNote.items.map(item => `
           <div class="item">
-            <div class="item-name">${item.product_name}</div>
-            <div class="item-detail">${item.quantity} x ${currencySymbol}${item.unit_price.toFixed(2)}</div>
-            <div class="row"><span></span><span style="color: #dc2626;">-${currencySymbol}${item.line_total.toFixed(2)}</span></div>
+            <div class="row">
+              <span class="item-name">${item.product_name}</span>
+              <span>${currencySymbol}${item.unit_price.toFixed(2)}</span>
+              <span>x${item.quantity}</span>
+              <span style="color: #dc2626;">-${currencySymbol}${item.line_total.toFixed(2)}</span>
+            </div>
+            <div class="item-detail">Brand: ${item.brand || 'N/A'}</div>
           </div>
         `).join('')}
         
@@ -872,16 +886,24 @@ export function POS() {
             <div className="border-t border-dashed border-slate-300 my-3" />
 
             {/* Items */}
-            <div className="space-y-2">
-              {(lastReceipt.items || []).map((item, idx) => (
-                <div key={idx} className="flex justify-between text-xs">
-                  <div className="flex-1">
-                    <p className="font-medium">{item.product_name}</p>
-                    <p className="text-slate-500">{item.quantity} x {formatCurrency(item.unit_price)}</p>
+            <div className="space-y-3">
+              {(lastReceipt.items || []).map((item, idx) => {
+                // Ensure brand is always available
+                const brandValue = (item.brand !== undefined && item.brand !== null && String(item.brand).trim() !== '') 
+                  ? String(item.brand).trim() 
+                  : 'N/A';
+                return (
+                  <div key={idx} className="text-xs border-b border-slate-100 pb-2">
+                    <div className="flex justify-between mb-1">
+                      <span className="font-medium">{item.product_name}</span>
+                      <span>{formatCurrency(item.unit_price)}</span>
+                      <span>x{item.quantity}</span>
+                      <span className="font-bold">{formatCurrency(item.line_total || item.quantity * item.unit_price)}</span>
+                    </div>
+                    <p className="text-slate-500 mt-1 ml-0">Brand: {brandValue}</p>
                   </div>
-                  <p className="font-bold">{formatCurrency(item.line_total || item.quantity * item.unit_price)}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="border-t border-dashed border-slate-300 my-3" />
@@ -1013,12 +1035,14 @@ export function POS() {
             <p className="font-bold text-center text-sm mb-2 text-red-600">RETURNED ITEMS</p>
             <div className="space-y-2">
               {lastCreditNote.items.map((item, idx) => (
-                <div key={idx} className="flex justify-between text-xs">
-                  <div className="flex-1">
-                    <p className="font-medium">{item.product_name}</p>
-                    <p className="text-slate-500">{item.quantity} x {formatCurrency(item.unit_price)}</p>
+                <div key={idx} className="text-xs">
+                  <div className="flex justify-between">
+                    <span className="font-medium">{item.product_name}</span>
+                    <span>{formatCurrency(item.unit_price)}</span>
+                    <span>x{item.quantity}</span>
+                    <span className="font-bold text-red-600">-{formatCurrency(item.line_total)}</span>
                   </div>
-                  <p className="font-bold text-red-600">-{formatCurrency(item.line_total)}</p>
+                  <p className="text-slate-500 mt-1">Brand: {item.brand || 'N/A'}</p>
                 </div>
               ))}
             </div>

@@ -400,14 +400,16 @@ export function Transactions() {
               <ScrollArea className="h-48">
                 <div className="space-y-2">
                   {selectedTransaction.items?.map((item, index) => (
-                    <div key={index} className="flex justify-between text-sm">
-                      <div>
-                        <p className="font-medium">{item.product_name}</p>
-                        <p className="text-xs text-slate-500">
-                          {item.quantity} x {formatCurrency(item.unit_price)}
-                        </p>
+                    <div key={index} className="text-sm">
+                      <div className="flex justify-between">
+                        <span className="font-medium">{item.product_name}</span>
+                        <span>{formatCurrency(item.unit_price)}</span>
+                        <span>x{item.quantity}</span>
+                        <span className="font-medium">{formatCurrency(item.line_total)}</span>
                       </div>
-                      <p className="font-medium">{formatCurrency(item.line_total)}</p>
+                      {item.brand && (
+                        <p className="text-xs text-slate-500 mt-1">Brand: {item.brand}</p>
+                      )}
                     </div>
                   ))}
                 </div>

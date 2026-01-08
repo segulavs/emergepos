@@ -12,7 +12,7 @@ export const useAuthStore = create(
       setAuth: (user, token) => {
         localStorage.setItem('pos_token', token);
         localStorage.setItem('pos_user', JSON.stringify(user));
-        set({ user, token, isAuthenticated: true });
+        set({ user, token, isAuthenticated: !!(user && token) });
       },
       
       logout: () => {
@@ -29,7 +29,44 @@ export const useAuthStore = create(
     }),
     {
       name: 'pos-auth',
-      partialize: (state) => ({ user: state.user, token: state.token, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({ user: state.user, token: state.token }),
+      // On rehydrate, ensure state is properly restored and isAuthenticated is computed
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Verify token exists in localStorage and sync
+          const token = localStorage.getItem('pos_token');
+          const userStr = localStorage.getItem('pos_user');
+          
+          if (token && userStr) {
+            // Ensure state matches localStorage
+            if (!state.token || !state.user) {
+              try {
+                const user = JSON.parse(userStr);
+                state.user = user;
+                state.token = token;
+              } catch (e) {
+                console.error('Failed to parse user from localStorage:', e);
+                // Clear corrupted data
+                localStorage.removeItem('pos_token');
+                localStorage.removeItem('pos_user');
+                state.user = null;
+                state.token = null;
+                state.isAuthenticated = false;
+                return;
+              }
+            }
+            // Compute isAuthenticated from user and token
+            state.isAuthenticated = !!(state.user && state.token);
+          } else {
+            // No token in localStorage, clear state
+            if (state.token || state.user) {
+              state.user = null;
+              state.token = null;
+            }
+            state.isAuthenticated = false;
+          }
+        }
+      },
     }
   )
 );
@@ -63,6 +100,7 @@ export const useCartStore = create((set, get) => ({
     const productName = product.product_name || product.name;
     const unitPrice = product.unit_price || product.selling_price;
     const sku = product.sku || '';
+    const brand = product.brand || '';
     const taxType = product.tax_type || 'standard';
     
     const existingIndex = items.findIndex(item => item.product_id === productId);
@@ -78,6 +116,7 @@ export const useCartStore = create((set, get) => ({
         product_id: productId,
         product_name: productName,
         sku: sku,
+        brand: brand,
         quantity,
         unit_price: unitPrice,
         discount_amount: 0,

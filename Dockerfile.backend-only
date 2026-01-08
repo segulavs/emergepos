@@ -1,4 +1,6 @@
-# Backend-only Dockerfile for faster development
+# Backend-only Dockerfile - Faster development without frontend build
+# Use this for: Development when frontend runs separately (npm start)
+# Build: docker build -t pos-backend:dev -f Dockerfile.backend-only .
 FROM python:3.11-slim
 
 WORKDIR /app

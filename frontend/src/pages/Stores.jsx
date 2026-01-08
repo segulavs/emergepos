@@ -25,7 +25,7 @@ import {
 import { toast } from 'sonner';
 
 export function Stores() {
-  const { user } = useAuthStore();
+  const { user, token, isAuthenticated } = useAuthStore();
   const { organization } = useOrgStore();
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -47,16 +47,61 @@ export function Stores() {
   const canEdit = ['super_admin', 'org_admin'].includes(user?.role);
 
   useEffect(() => {
+    // Check authentication before loading
+    const storedToken = localStorage.getItem('pos_token');
+    const storedUser = localStorage.getItem('pos_user');
+    
+    console.log('[Stores] Component mounted');
+    console.log('[Stores] Auth state:', { isAuthenticated, hasToken: !!token, hasStoredToken: !!storedToken, hasUser: !!user });
+    
+    if (!storedToken && !token) {
+      console.error('[Stores] No token found - redirecting to login');
+      window.location.href = '/login';
+      return;
+    }
+    
     loadStores();
   }, []);
 
   const loadStores = async () => {
     setLoading(true);
     try {
+      console.log('[Stores] Loading stores...');
+      console.log('[Stores] User:', user);
+      console.log('[Stores] Token exists:', !!localStorage.getItem('pos_token'));
+      
       const response = await storeAPI.getAll();
-      setStores(response.data);
+      console.log('[Stores] Response:', response);
+      console.log('[Stores] Stores data:', response.data);
+      setStores(response.data || []);
+      
+      if (!response.data || response.data.length === 0) {
+        console.warn('[Stores] No stores found');
+        toast.info('No stores found. Create your first store to get started.');
+      }
     } catch (error) {
-      toast.error('Failed to load stores');
+      console.error('[Stores] Failed to load stores:', error);
+      const errorMsg = error.response?.data?.detail || error.message || 'Failed to load stores';
+      console.error('[Stores] Error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+        code: error.code,
+      });
+      
+      // More helpful error messages
+      if (error.response?.status === 401 || errorMsg.includes('Not authenticated') || errorMsg.includes('authentication')) {
+        toast.error('Authentication failed. Please log out and log in again.');
+        // Redirect to login after a delay
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
+      } else if (error.response?.status === 400 && error.response?.data?.detail?.includes('organization')) {
+        toast.error('No organization associated. Please contact your administrator.');
+      } else {
+        toast.error(errorMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -200,9 +245,22 @@ export function Stores() {
             </CardContent>
           </Card>
         ))}
+        {loading && (
+          <Card className="col-span-full p-8 text-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+              <p className="text-slate-500">Loading stores...</p>
+            </div>
+          </Card>
+        )}
         {stores.length === 0 && !loading && (
           <Card className="col-span-full p-8 text-center">
-            <p className="text-slate-500">No stores found. Create your first store!</p>
+            <p className="text-slate-500 mb-4">No stores found.</p>
+            {canEdit && (
+              <Button onClick={openCreateDialog} className="bg-emerald-600 hover:bg-emerald-700">
+                Create your first store
+              </Button>
+            )}
           </Card>
         )}
       </div>

@@ -1,4 +1,6 @@
-# Multi-stage build for production optimization
+# Production Dockerfile - Multi-stage build for optimized production deployment
+# Use this for: Production deployments (Azure, GCP, AWS, etc.)
+# Build: docker build -t pos-app:latest -f Dockerfile .
 FROM node:18-alpine AS frontend-builder
 
 # Set working directory for frontend

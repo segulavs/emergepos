@@ -1,21 +1,43 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 import '../models/product.dart';
 import '../models/transaction.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:8000/api';
-  static const String _tokenKey = 'auth_token';
+  // Default base URL - can be overridden via SharedPreferences
+  static String get baseUrl {
+    if (kIsWeb) {
+      return 'http://localhost:8000/api';
+    } else if (Platform.isAndroid) {
+      // For Android emulator, use 10.0.2.2 which maps to host's localhost
+      // For physical devices, this should be configured to the actual server IP
+      return 'http://10.0.2.2:8000/api';
+    } else if (Platform.isIOS) {
+      return 'http://localhost:8000/api';
+    }
+    return 'http://localhost:8000/api';
+  }
   
-  late final Dio _dio;
+  static const String _tokenKey = 'auth_token';
+  static const String _baseUrlKey = 'api_base_url';
+  
+  late Dio _dio;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   
   String? _authToken;
+  bool _dioInitialized = false;
 
   ApiService() {
+    _initializeDio();
+    _loadCustomBaseUrl();
+  }
+
+  void _initializeDio() {
     _dio = Dio(BaseOptions(
       baseUrl: baseUrl,
       connectTimeout: const Duration(seconds: 30),
@@ -40,6 +62,44 @@ class ApiService {
         handler.next(error);
       },
     ));
+    
+    _dioInitialized = true;
+  }
+
+  Future<void> _loadCustomBaseUrl() async {
+    // Load custom base URL asynchronously and update if found
+    if (!kIsWeb) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final customUrl = prefs.getString(_baseUrlKey);
+        if (customUrl != null && customUrl.isNotEmpty && customUrl != _dio.options.baseUrl) {
+          _dio.options.baseUrl = customUrl;
+          if (kDebugMode) {
+            print('Using custom API URL: $customUrl');
+          }
+        }
+      } catch (e) {
+        // If SharedPreferences fails, use default
+        if (kDebugMode) {
+          print('Failed to load custom API URL: $e');
+        }
+      }
+    }
+  }
+
+  // Method to set custom base URL
+  Future<void> setBaseUrl(String url) async {
+    _dio.options.baseUrl = url;
+    if (!kIsWeb) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_baseUrlKey, url);
+      } catch (e) {
+        if (kDebugMode) {
+          print('Failed to save custom API URL: $e');
+        }
+      }
+    }
   }
 
   // Authentication

@@ -1,4 +1,6 @@
-# Local development Dockerfile
+# Local development Dockerfile - Full stack with hot reload
+# Use this for: Local Docker Compose development (docker-compose.yml)
+# Build: Automatically built by docker-compose
 FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend

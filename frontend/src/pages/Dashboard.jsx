@@ -4,6 +4,22 @@ import { analyticsAPI } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   LineChart,
   Line,
@@ -23,24 +39,37 @@ export function Dashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [salesTrend, setSalesTrend] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
+  const [period, setPeriod] = useState('monthly');
+  const [salesPerProduct, setSalesPerProduct] = useState([]);
+  const [profitPerProduct, setProfitPerProduct] = useState([]);
+  const [salesPerBranch, setSalesPerBranch] = useState([]);
+  const [profitPerBranch, setProfitPerBranch] = useState([]);
 
   const currencySymbol = organization?.settings?.currency_symbol || 'K';
 
   useEffect(() => {
     loadDashboardData();
-  }, [selectedStore]);
+  }, [selectedStore, period]);
 
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [dashRes, trendRes, topRes] = await Promise.all([
+      const [dashRes, trendRes, topRes, salesProdRes, profitProdRes, salesBranchRes, profitBranchRes] = await Promise.all([
         analyticsAPI.getDashboard(selectedStore?.id),
         analyticsAPI.getSalesTrend({ store_id: selectedStore?.id, days: 14 }),
         analyticsAPI.getTopProducts({ store_id: selectedStore?.id, limit: 5 }),
+        analyticsAPI.getSalesPerProduct({ store_id: selectedStore?.id, period }),
+        analyticsAPI.getProfitPerProduct({ store_id: selectedStore?.id, period }),
+        analyticsAPI.getSalesPerBranch({ period }),
+        analyticsAPI.getProfitPerBranch({ period }),
       ]);
       setDashboard(dashRes.data);
       setSalesTrend(trendRes.data);
       setTopProducts(topRes.data);
+      setSalesPerProduct(salesProdRes.data || []);
+      setProfitPerProduct(profitProdRes.data || []);
+      setSalesPerBranch(salesBranchRes.data || []);
+      setProfitPerBranch(profitBranchRes.data || []);
     } catch (error) {
       console.error('Failed to load dashboard:', error);
     } finally {
@@ -71,9 +100,25 @@ export function Dashboard() {
             {selectedStore ? `${selectedStore.name} Overview` : 'All Stores Overview'}
           </p>
         </div>
-        <Badge variant="outline" className="text-emerald-600 border-emerald-600">
-          {organization?.name || 'Organization'}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="daily">Daily</SelectItem>
+              <SelectItem value="weekly">Weekly</SelectItem>
+              <SelectItem value="monthly">Monthly</SelectItem>
+              <SelectItem value="yearly">Yearly</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" onClick={loadDashboardData} size="sm">
+            Refresh
+          </Button>
+          <Badge variant="outline" className="text-emerald-600 border-emerald-600">
+            {organization?.name || 'Organization'}
+          </Badge>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -258,6 +303,158 @@ export function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Sales & Profit Per Product */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Sales Per Product ({period.charAt(0).toUpperCase() + period.slice(1)})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {salesPerProduct.length > 0 ? (
+              <div className="max-h-96 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Sales</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {salesPerProduct.slice(0, 20).map((product) => (
+                      <TableRow key={product.product_id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{product.product_name}</p>
+                            {product.brand && (
+                              <p className="text-xs text-slate-500">Brand: {product.brand}</p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{product.quantity_sold}</TableCell>
+                        <TableCell className="text-right font-bold text-emerald-600">
+                          {formatCurrency(product.total_sales)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="text-center py-8 text-slate-500">No product sales data</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Profit Per Product ({period.charAt(0).toUpperCase() + period.slice(1)})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {profitPerProduct.length > 0 ? (
+              <div className="max-h-96 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Profit</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {profitPerProduct.slice(0, 20).map((product) => (
+                      <TableRow key={product.product_id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{product.product_name}</p>
+                            {product.brand && (
+                              <p className="text-xs text-slate-500">Brand: {product.brand}</p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{product.quantity_sold}</TableCell>
+                        <TableCell className={`text-right font-bold ${product.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {formatCurrency(product.profit)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="text-center py-8 text-slate-500">No product profit data</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sales & Profit Per Branch */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Sales Per Branch ({period.charAt(0).toUpperCase() + period.slice(1)})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {salesPerBranch.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Branch</TableHead>
+                    <TableHead className="text-right">Transactions</TableHead>
+                    <TableHead className="text-right">Sales</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {salesPerBranch.map((branch) => (
+                    <TableRow key={branch.store_id}>
+                      <TableCell className="font-medium">{branch.store_name}</TableCell>
+                      <TableCell className="text-right">{branch.transaction_count}</TableCell>
+                      <TableCell className="text-right font-bold text-emerald-600">
+                        {formatCurrency(branch.total_sales)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-center py-8 text-slate-500">No branch sales data</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Profit Per Branch ({period.charAt(0).toUpperCase() + period.slice(1)})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {profitPerBranch.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Branch</TableHead>
+                    <TableHead className="text-right">Sales</TableHead>
+                    <TableHead className="text-right">Profit</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {profitPerBranch.map((branch) => (
+                    <TableRow key={branch.store_id}>
+                      <TableCell className="font-medium">{branch.store_name}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(branch.total_sales)}</TableCell>
+                      <TableCell className={`text-right font-bold ${branch.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {formatCurrency(branch.profit)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-center py-8 text-slate-500">No branch profit data</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Recent Transactions */}
       <Card>

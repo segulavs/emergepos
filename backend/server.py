@@ -1,7 +1,7 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Query, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -15,6 +15,10 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
 from enum import Enum
+import pandas as pd
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -534,6 +538,7 @@ class TransactionItem(BaseModel):
     product_id: str
     product_name: str
     sku: str
+    brand: Optional[str] = ""
     quantity: float
     unit_price: float
     discount_amount: float = 0
@@ -691,11 +696,22 @@ def decode_token(token: str) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
-    payload = decode_token(credentials.credentials)
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+    try:
+        payload = decode_token(credentials.credentials)
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+        if not user:
+            logger.warning(f"User not found for token payload: {payload.get('sub')}")
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"Error getting current user: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 def require_role(allowed_roles: List[UserRole]):
     async def role_checker(user: Dict = Depends(get_current_user)):
@@ -717,14 +733,30 @@ def serialize_datetime(obj):
 def deserialize_datetime(obj, fields=['created_at', 'updated_at', 'started_at', 'ended_at', 'dispatched_at', 'received_at', 'last_login', 'last_sync_at', 'completed_at', 'approved_at']):
     """Convert ISO strings back to datetime objects"""
     if isinstance(obj, dict):
+        # Create a copy to avoid modifying the original
+        result = {}
         for key, value in obj.items():
             if key in fields and isinstance(value, str):
                 try:
-                    obj[key] = datetime.fromisoformat(value)
-                except:
-                    pass
-            elif isinstance(value, (dict, list)):
-                obj[key] = deserialize_datetime(value, fields)
+                    # Handle different datetime formats
+                    if 'T' in value or ' ' in value:
+                        # Try parsing ISO format
+                        if value.endswith('Z'):
+                            value = value[:-1] + '+00:00'
+                        result[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    else:
+                        # Keep original value if not a valid datetime string
+                        result[key] = value
+                except (ValueError, AttributeError, TypeError):
+                    # Keep original value if parsing fails
+                    result[key] = value
+            elif isinstance(value, dict):
+                result[key] = deserialize_datetime(value, fields)
+            elif isinstance(value, list):
+                result[key] = [deserialize_datetime(item, fields) for item in value]
+            else:
+                result[key] = value
+        return result
     elif isinstance(obj, list):
         return [deserialize_datetime(item, fields) for item in obj]
     return obj
@@ -810,24 +842,38 @@ async def register(data: UserCreate):
 @api_router.post("/auth/login", response_model=TokenResponse)
 async def login(data: UserLogin):
     """Login with email and password"""
-    user = await db.users.find_one({"email": data.email}, {"_id": 0})
-    if not user or not verify_password(data.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    if not user.get("is_active", True):
-        raise HTTPException(status_code=401, detail="Account is deactivated")
-    
-    # Update last login
-    await db.users.update_one(
-        {"id": user["id"]},
-        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
-    )
-    
-    token = create_token(user["id"], user.get("organization_id"), user["role"])
-    return TokenResponse(
-        access_token=token,
-        user=UserResponse(**user)
-    )
+    logger.info(f"Login attempt for email: {data.email}")
+    try:
+        user = await db.users.find_one({"email": data.email}, {"_id": 0})
+        if not user:
+            logger.warning(f"Login failed: User not found for email {data.email}")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        if not verify_password(data.password, user["password_hash"]):
+            logger.warning(f"Login failed: Invalid password for email {data.email}")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        if not user.get("is_active", True):
+            logger.warning(f"Login failed: Account deactivated for email {data.email}")
+            raise HTTPException(status_code=401, detail="Account is deactivated")
+        
+        # Update last login
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        token = create_token(user["id"], user.get("organization_id"), user["role"])
+        logger.info(f"Login successful for user: {user['id']} ({data.email})")
+        return TokenResponse(
+            access_token=token,
+            user=UserResponse(**user)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @api_router.get("/auth/me", response_model=UserResponse)
 async def get_me(user: Dict = Depends(get_current_user)):
@@ -928,27 +974,105 @@ async def create_store(
 @api_router.get("/stores", response_model=List[Store])
 async def get_stores(user: Dict = Depends(get_current_user)):
     """Get all stores for current organization"""
-    if not user.get("organization_id"):
-        raise HTTPException(status_code=400, detail="No organization associated")
-    
-    query = {"organization_id": user["organization_id"]}
-    
-    # Cashiers and store admins only see their assigned stores
-    if user["role"] in [UserRole.CASHIER, UserRole.STORE_ADMIN]:
-        if user.get("store_ids"):
-            query["id"] = {"$in": user["store_ids"]}
-    
-    stores = await db.stores.find(query, {"_id": 0}).to_list(1000)
-    return [deserialize_datetime(store) for store in stores]
+    try:
+        logger.info(f"Getting stores for user: {user.get('id')}, org: {user.get('organization_id')}, role: {user.get('role')}")
+        
+        if not user.get("organization_id"):
+            logger.warning(f"User {user.get('id')} has no organization_id")
+            raise HTTPException(status_code=400, detail="No organization associated. Please contact your administrator.")
+        
+        query = {"organization_id": user["organization_id"]}
+        
+        # Cashiers and store admins only see their assigned stores
+        if user["role"] in [UserRole.CASHIER, UserRole.STORE_ADMIN]:
+            if user.get("store_ids"):
+                query["id"] = {"$in": user["store_ids"]}
+            else:
+                # No assigned stores, return empty list
+                logger.info(f"User {user.get('id')} has no assigned stores")
+                return []
+        
+        logger.info(f"Querying stores with query: {query}")
+        stores = await db.stores.find(query, {"_id": 0}).to_list(1000)
+        logger.info(f"Found {len(stores)} stores for organization {user.get('organization_id')}")
+        
+        if not stores:
+            logger.info("No stores found, returning empty list")
+            return []
+        
+        # Deserialize stores and convert to Store models
+        result_stores = []
+        for idx, store in enumerate(stores):
+            try:
+                # Ensure required fields exist with proper defaults
+                if 'address' not in store or store['address'] is None:
+                    store['address'] = StoreAddress().model_dump()
+                elif isinstance(store['address'], dict):
+                    # Ensure address dict has all required fields
+                    address = store['address']
+                    store['address'] = {
+                        'street': address.get('street', ''),
+                        'city': address.get('city', ''),
+                        'province': address.get('province', ''),
+                        'postal_code': address.get('postal_code', ''),
+                        'country': address.get('country', 'Zambia')
+                    }
+                
+                if 'location' not in store or store['location'] is None:
+                    store['location'] = StoreLocation().model_dump()
+                elif isinstance(store['location'], dict):
+                    # Ensure location dict has all required fields
+                    location = store['location']
+                    store['location'] = {
+                        'latitude': location.get('latitude'),
+                        'longitude': location.get('longitude')
+                    }
+                
+                # Deserialize datetime fields
+                deserialized = deserialize_datetime(store)
+                
+                # Ensure datetime fields are either datetime objects or None
+                for field in ['created_at', 'updated_at', 'last_sync_at']:
+                    if field in deserialized:
+                        if deserialized[field] is None:
+                            # Use current time for None timestamps
+                            if field in ['created_at', 'updated_at']:
+                                deserialized[field] = datetime.now(timezone.utc)
+                        elif isinstance(deserialized[field], str):
+                            try:
+                                deserialized[field] = datetime.fromisoformat(deserialized[field].replace('Z', '+00:00'))
+                            except:
+                                deserialized[field] = datetime.now(timezone.utc) if field in ['created_at', 'updated_at'] else None
+                
+                # Convert to Store model instance
+                store_model = Store(**deserialized)
+                result_stores.append(store_model)
+            except Exception as e:
+                logger.error(f"Error processing store {idx}: {store.get('id', 'unknown')}: {str(e)}", exc_info=True)
+                # Skip problematic stores rather than failing entirely
+                continue
+        
+        logger.info(f"Returning {len(result_stores)} stores")
+        return result_stores
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_stores: {str(e)}", exc_info=True)
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @api_router.get("/stores/{store_id}", response_model=Store)
 async def get_store(store_id: str, user: Dict = Depends(get_current_user)):
     """Get store by ID"""
-    store = await db.stores.find_one({
-        "id": store_id,
-        "organization_id": user["organization_id"]
-    }, {"_id": 0})
+    query = {"id": store_id}
+    # Organization admins can only access stores from their organization
+    if user["role"] != UserRole.SUPER_ADMIN:
+        if not user.get("organization_id"):
+            raise HTTPException(status_code=400, detail="No organization associated")
+        query["organization_id"] = user["organization_id"]
     
+    store = await db.stores.find_one(query, {"_id": 0})
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
     return deserialize_datetime(store)
@@ -1561,7 +1685,13 @@ async def update_product(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    # Verify product belongs to user's organization
+    query = {"id": product_id}
+    if user["role"] != UserRole.SUPER_ADMIN:
+        query["organization_id"] = user["organization_id"]
+    product = await db.products.find_one(query, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
     return deserialize_datetime(product)
 
 @api_router.delete("/products/{product_id}")
@@ -1579,6 +1709,234 @@ async def delete_product(
         raise HTTPException(status_code=404, detail="Product not found")
     
     return {"message": "Product deleted"}
+
+@api_router.get("/products/template")
+async def download_product_template(user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))):
+    """Download Excel template for product import"""
+    logger.info("Generating product import template")
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Products"
+        
+        # Header row with styling
+        headers = [
+            "Name*", "SKU*", "Barcode", "Brand", "Category", 
+            "Cost Price*", "Selling Price*", "Tax Type", "Unit", "Description"
+        ]
+        
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Add example rows
+        examples = [
+            ["Sample Product 1", "SKU001", "1234567890123", "Brand A", "Electronics", "100.00", "150.00", "exempt", "piece", "Sample description"],
+            ["Sample Product 2", "SKU002", "", "Brand B", "Food", "50.00", "75.00", "standard", "kg", ""],
+        ]
+        
+        for row_num, example in enumerate(examples, 2):
+            for col_num, value in enumerate(example, 1):
+                ws.cell(row=row_num, column=col_num, value=value)
+        
+        # Set column widths
+        column_widths = [25, 15, 18, 15, 15, 12, 15, 12, 10, 30]
+        for col_num, width in enumerate(column_widths, 1):
+            ws.column_dimensions[ws.cell(row=1, column=col_num).column_letter].width = width
+        
+        # Add instructions sheet
+        ws_instructions = wb.create_sheet("Instructions")
+        instructions = [
+            ["Product Import Template - Instructions"],
+            [""],
+            ["Required Fields (marked with *):"],
+            ["- Name: Product name (required)"],
+            ["- SKU: Stock Keeping Unit, must be unique (required)"],
+            ["- Cost Price: Product cost price (required)"],
+            ["- Selling Price: Product selling price (required)"],
+            [""],
+            ["Optional Fields:"],
+            ["- Barcode: Product barcode"],
+            ["- Brand: Product brand name"],
+            ["- Category: Product category (default: General)"],
+            ["- Tax Type: exempt (default), zero_rated, or standard"],
+            ["- Unit: piece (default), kg, g, l, ml, box, pack"],
+            ["- Description: Product description"],
+            [""],
+            ["Tax Type Options:"],
+            ["- exempt: No tax (default)"],
+            ["- zero_rated: 0% tax"],
+            ["- standard: VAT 16%"],
+            [""],
+            ["Unit Options:"],
+            ["- piece, kg, g, l, ml, box, pack"],
+            [""],
+            ["Notes:"],
+            ["- SKU must be unique within your organization"],
+            ["- Barcode must be unique if provided"],
+            ["- Prices should be numeric values"],
+            ["- Remove example rows before uploading"],
+        ]
+        
+        for row_num, instruction in enumerate(instructions, 1):
+            ws_instructions.cell(row=row_num, column=1, value=instruction[0])
+            if row_num == 1:
+                ws_instructions.cell(row=row_num, column=1).font = Font(bold=True, size=14)
+        
+        # Save to BytesIO
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Get bytes from the buffer
+        excel_bytes = output.getvalue()
+        output.close()
+        
+        logger.info(f"Template generated successfully, size: {len(excel_bytes)} bytes")
+        
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": "attachment; filename=product_import_template.xlsx",
+                "Content-Length": str(len(excel_bytes))
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error generating template: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate template: {str(e)}")
+
+@api_router.post("/products/import")
+async def import_products_from_excel(
+    file: UploadFile = File(...),
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Import products from Excel file"""
+    if not user.get("organization_id"):
+        raise HTTPException(status_code=400, detail="No organization associated")
+    
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    
+    try:
+        # Read Excel file
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents), sheet_name=0)
+        
+        # Validate required columns
+        required_columns = ['Name', 'SKU', 'Cost Price', 'Selling Price']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Missing required columns: {', '.join(missing_columns)}"
+            )
+        
+        # Process products
+        created_count = 0
+        updated_count = 0
+        errors = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Get values with defaults
+                name = str(row['Name']).strip()
+                sku = str(row['SKU']).strip()
+                barcode = str(row.get('Barcode', '')).strip() if pd.notna(row.get('Barcode')) else None
+                brand = str(row.get('Brand', '')).strip() if pd.notna(row.get('Brand')) else ''
+                category = str(row.get('Category', 'General')).strip() if pd.notna(row.get('Category')) else 'General'
+                cost_price = float(row['Cost Price'])
+                selling_price = float(row['Selling Price'])
+                tax_type = str(row.get('Tax Type', 'exempt')).strip().lower() if pd.notna(row.get('Tax Type')) else 'exempt'
+                unit = str(row.get('Unit', 'piece')).strip().lower() if pd.notna(row.get('Unit')) else 'piece'
+                description = str(row.get('Description', '')).strip() if pd.notna(row.get('Description')) else ''
+                
+                # Validate tax_type
+                if tax_type not in ['exempt', 'zero_rated', 'standard']:
+                    tax_type = 'exempt'
+                
+                # Validate unit
+                valid_units = ['piece', 'kg', 'g', 'l', 'ml', 'box', 'pack']
+                if unit not in valid_units:
+                    unit = 'piece'
+                
+                # Validate required fields
+                if not name or not sku:
+                    errors.append(f"Row {index + 2}: Name and SKU are required")
+                    continue
+                
+                if cost_price < 0 or selling_price < 0:
+                    errors.append(f"Row {index + 2}: Prices must be non-negative")
+                    continue
+                
+                # Check if product exists
+                query = {
+                    "organization_id": user["organization_id"],
+                    "sku": sku
+                }
+                if barcode:
+                    query = {
+                        "organization_id": user["organization_id"],
+                        "$or": [{"sku": sku}, {"barcode": barcode}]
+                    }
+                
+                existing = await db.products.find_one(query)
+                
+                product_data = {
+                    "name": name,
+                    "description": description,
+                    "sku": sku,
+                    "barcode": barcode if barcode else None,
+                    "brand": brand,
+                    "category": category,
+                    "cost_price": cost_price,
+                    "selling_price": selling_price,
+                    "tax_type": tax_type,
+                    "unit": unit,
+                    "is_active": True,
+                }
+                
+                if existing:
+                    # Update existing product
+                    update_data = serialize_datetime({
+                        **product_data,
+                        "updated_at": datetime.now(timezone.utc)
+                    })
+                    await db.products.update_one(
+                        {"id": existing["id"]},
+                        {"$set": update_data}
+                    )
+                    updated_count += 1
+                else:
+                    # Create new product
+                    product = Product(
+                        organization_id=user["organization_id"],
+                        **product_data
+                    )
+                    await db.products.insert_one(serialize_datetime(product.model_dump()))
+                    created_count += 1
+                    
+            except Exception as e:
+                errors.append(f"Row {index + 2}: {str(e)}")
+                continue
+        
+        return {
+            "message": "Import completed",
+            "created": created_count,
+            "updated": updated_count,
+            "errors": errors,
+            "total_processed": created_count + updated_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Error importing products: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
 
 @api_router.get("/products/with-stock/{store_id}")
 async def get_products_with_stock(
@@ -2983,6 +3341,13 @@ async def get_top_products(
     }
     
     if store_id:
+        # Verify store belongs to user's organization
+        store = await db.stores.find_one({
+            "id": store_id,
+            "organization_id": user["organization_id"]
+        }, {"id": 1})
+        if not store:
+            raise HTTPException(status_code=404, detail="Store not found or access denied")
         match_query["store_id"] = store_id
     
     pipeline = [
@@ -3020,6 +3385,13 @@ async def get_dashboard_data(
     
     base_query = {"organization_id": user["organization_id"]}
     if store_id:
+        # Verify store belongs to user's organization
+        store = await db.stores.find_one({
+            "id": store_id,
+            "organization_id": user["organization_id"]
+        }, {"id": 1})
+        if not store:
+            raise HTTPException(status_code=404, detail="Store not found or access denied")
         base_query["store_id"] = store_id
     
     # Today's sales
@@ -3129,6 +3501,290 @@ async def get_dashboard_data(
         "store_count": store_count,
         "product_count": product_count
     }
+
+@api_router.get("/analytics/sales-per-product")
+async def get_sales_per_product(
+    store_id: Optional[str] = None,
+    period: str = "monthly",  # daily, weekly, monthly, yearly
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Get sales per product with filters"""
+    now = datetime.now(timezone.utc)
+    
+    # Calculate date range based on period
+    if period == "daily":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=365)
+    
+    match_query = {
+        "organization_id": user["organization_id"],
+        "status": TransactionStatus.COMPLETED.value,
+        "created_at": {"$gte": start_date.isoformat()}
+    }
+    
+    if store_id:
+        # Verify store belongs to user's organization
+        store = await db.stores.find_one({
+            "id": store_id,
+            "organization_id": user["organization_id"]
+        }, {"id": 1})
+        if not store:
+            raise HTTPException(status_code=404, detail="Store not found or access denied")
+        match_query["store_id"] = store_id
+    
+    pipeline = [
+        {"$match": match_query},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.product_id",
+            "product_name": {"$first": "$items.product_name"},
+            "sku": {"$first": "$items.sku"},
+            "brand": {"$first": "$items.brand"},
+            "total_quantity": {"$sum": "$items.quantity"},
+            "total_sales": {"$sum": "$items.line_total"},
+            "total_cost": {"$sum": {"$multiply": ["$items.quantity", "$items.unit_price"]}}  # Will be updated with actual cost
+        }},
+        {"$sort": {"total_sales": -1}}
+    ]
+    
+    results = await db.transactions.aggregate(pipeline).to_list(1000)
+    
+    # Get product costs to calculate profit (only from user's organization)
+    product_ids = [r["_id"] for r in results]
+    products = await db.products.find({
+        "id": {"$in": product_ids},
+        "organization_id": user["organization_id"]
+    }, {"_id": 0, "id": 1, "cost_price": 1}).to_list(1000)
+    cost_map = {p["id"]: p.get("cost_price", 0) for p in products}
+    
+    return [{
+        "product_id": r["_id"],
+        "product_name": r["product_name"],
+        "sku": r.get("sku", ""),
+        "brand": r.get("brand", ""),
+        "quantity_sold": r["total_quantity"],
+        "total_sales": round(r["total_sales"], 2),
+        "total_cost": round(r["total_quantity"] * cost_map.get(r["_id"], 0), 2),
+        "profit": round(r["total_sales"] - (r["total_quantity"] * cost_map.get(r["_id"], 0)), 2)
+    } for r in results]
+
+@api_router.get("/analytics/profit-per-product")
+async def get_profit_per_product(
+    store_id: Optional[str] = None,
+    period: str = "monthly",
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Get profit per product with filters (same as sales-per-product but sorted by profit)"""
+    now = datetime.now(timezone.utc)
+    
+    if period == "daily":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=365)
+    
+    match_query = {
+        "organization_id": user["organization_id"],
+        "status": TransactionStatus.COMPLETED.value,
+        "created_at": {"$gte": start_date.isoformat()}
+    }
+    
+    if store_id:
+        # Verify store belongs to user's organization
+        store = await db.stores.find_one({
+            "id": store_id,
+            "organization_id": user["organization_id"]
+        }, {"id": 1})
+        if not store:
+            raise HTTPException(status_code=404, detail="Store not found or access denied")
+        match_query["store_id"] = store_id
+    
+    pipeline = [
+        {"$match": match_query},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.product_id",
+            "product_name": {"$first": "$items.product_name"},
+            "sku": {"$first": "$items.sku"},
+            "brand": {"$first": "$items.brand"},
+            "total_quantity": {"$sum": "$items.quantity"},
+            "total_sales": {"$sum": "$items.line_total"}
+        }},
+        {"$sort": {"total_sales": -1}}
+    ]
+    
+    results = await db.transactions.aggregate(pipeline).to_list(1000)
+    
+    # Get product costs (only from user's organization)
+    product_ids = [r["_id"] for r in results]
+    products = await db.products.find({
+        "id": {"$in": product_ids},
+        "organization_id": user["organization_id"]
+    }, {"_id": 0, "id": 1, "cost_price": 1}).to_list(1000)
+    cost_map = {p["id"]: p.get("cost_price", 0) for p in products}
+    
+    # Calculate profit for each product
+    products_with_profit = []
+    for r in results:
+        cost = cost_map.get(r["_id"], 0)
+        total_cost = r["total_quantity"] * cost
+        profit = r["total_sales"] - total_cost
+        products_with_profit.append({
+            "product_id": r["_id"],
+            "product_name": r["product_name"],
+            "sku": r.get("sku", ""),
+            "brand": r.get("brand", ""),
+            "quantity_sold": r["total_quantity"],
+            "total_sales": round(r["total_sales"], 2),
+            "total_cost": round(total_cost, 2),
+            "profit": round(profit, 2)
+        })
+    
+    # Sort by profit descending
+    products_with_profit.sort(key=lambda x: x["profit"], reverse=True)
+    
+    return products_with_profit
+
+@api_router.get("/analytics/sales-per-branch")
+async def get_sales_per_branch(
+    period: str = "monthly",
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Get sales per branch/store with period filter"""
+    now = datetime.now(timezone.utc)
+    
+    if period == "daily":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=365)
+    
+    match_query = {
+        "organization_id": user["organization_id"],
+        "status": TransactionStatus.COMPLETED.value,
+        "created_at": {"$gte": start_date.isoformat()}
+    }
+    
+    pipeline = [
+        {"$match": match_query},
+        {"$group": {
+            "_id": "$store_id",
+            "total_sales": {"$sum": "$total"},
+            "total_tax": {"$sum": "$tax_amount"},
+            "transaction_count": {"$sum": 1}
+        }},
+        {"$sort": {"total_sales": -1}}
+    ]
+    
+    results = await db.transactions.aggregate(pipeline).to_list(100)
+    
+    # Get store names (only from user's organization)
+    store_ids = [r["_id"] for r in results]
+    stores = await db.stores.find({
+        "id": {"$in": store_ids},
+        "organization_id": user["organization_id"]
+    }, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    store_map = {s["id"]: s["name"] for s in stores}
+    
+    return [{
+        "store_id": r["_id"],
+        "store_name": store_map.get(r["_id"], "Unknown"),
+        "total_sales": round(r["total_sales"], 2),
+        "total_tax": round(r["total_tax"], 2),
+        "transaction_count": r["transaction_count"]
+    } for r in results]
+
+@api_router.get("/analytics/profit-per-branch")
+async def get_profit_per_branch(
+    period: str = "monthly",
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Get profit per branch/store with period filter"""
+    now = datetime.now(timezone.utc)
+    
+    if period == "daily":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=365)
+    
+    match_query = {
+        "organization_id": user["organization_id"],
+        "status": TransactionStatus.COMPLETED.value,
+        "created_at": {"$gte": start_date.isoformat()}
+    }
+    
+    # Get transactions with items
+    pipeline = [
+        {"$match": match_query},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$store_id",
+            "total_sales": {"$sum": "$items.line_total"},
+            "items": {"$push": {
+                "product_id": "$items.product_id",
+                "quantity": "$items.quantity"
+            }}
+        }}
+    ]
+    
+    results = await db.transactions.aggregate(pipeline).to_list(100)
+    
+    # Get store names (only from user's organization)
+    store_ids = [r["_id"] for r in results]
+    stores = await db.stores.find({
+        "id": {"$in": store_ids},
+        "organization_id": user["organization_id"]
+    }, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    store_map = {s["id"]: s["name"] for s in stores}
+    
+    # Get product costs (only from user's organization)
+    all_product_ids = set()
+    for r in results:
+        for item in r["items"]:
+            all_product_ids.add(item["product_id"])
+    
+    products = await db.products.find({
+        "id": {"$in": list(all_product_ids)},
+        "organization_id": user["organization_id"]
+    }, {"_id": 0, "id": 1, "cost_price": 1}).to_list(1000)
+    cost_map = {p["id"]: p.get("cost_price", 0) for p in products}
+    
+    # Calculate profit for each branch
+    branches_with_profit = []
+    for r in results:
+        total_cost = 0
+        for item in r["items"]:
+            cost = cost_map.get(item["product_id"], 0)
+            total_cost += item["quantity"] * cost
+        
+        profit = r["total_sales"] - total_cost
+        branches_with_profit.append({
+            "store_id": r["_id"],
+            "store_name": store_map.get(r["_id"], "Unknown"),
+            "total_sales": round(r["total_sales"], 2),
+            "total_cost": round(total_cost, 2),
+            "profit": round(profit, 2)
+        })
+    
+    # Sort by profit descending
+    branches_with_profit.sort(key=lambda x: x["profit"], reverse=True)
+    
+    return branches_with_profit
 
 # ==================== SYNC ROUTES ====================
 
@@ -3572,29 +4228,61 @@ async def health_check():
 # Include router and setup middleware
 app.include_router(api_router)
 
+# Add explicit OPTIONS handler for CORS preflight
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle CORS preflight requests"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
+
+# CORS middleware - must be added after router but before static file serving
+cors_origins = os.environ.get('CORS_ORIGINS', '*')
+if cors_origins == '*':
+    # Allow all origins
+    allow_origins = ['*']
+else:
+    # Split comma-separated origins
+    allow_origins = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
+    allow_origins=allow_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Serve static frontend files (for Railway/production deployment)
 STATIC_DIR = ROOT_DIR / "static"
 if STATIC_DIR.exists():
-    # Mount static assets (JS, CSS, images, etc.)
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "static")), name="static_assets")
+    # Mount static assets (JS, CSS, images, etc.) from the static subdirectory
+    static_assets_dir = STATIC_DIR / "static"
+    if static_assets_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_assets_dir)), name="static_assets")
     
     # Serve index.html for all non-API routes (SPA support)
+    # Only handle GET requests - POST/PUT/DELETE go to API router
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         """Serve the React SPA for all non-API routes"""
-        # Don't intercept API routes
+        # Don't intercept API routes (shouldn't happen with GET, but safety check)
         if full_path.startswith("api/"):
+            logger.warning(f"GET request to API route: /{full_path} - returning 404")
             raise HTTPException(status_code=404, detail="Not found")
         
-        # Serve static files if they exist
+        # Don't intercept /static routes (handled by mount above)
+        if full_path.startswith("static/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Serve static files if they exist (like manifest.json, favicon.ico, etc.)
         file_path = STATIC_DIR / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))

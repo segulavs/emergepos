@@ -388,28 +388,6 @@ docker system prune -f
 - **Discussions**: Use GitHub Discussions for questions
 - **Email**: support@pos-system.com (for enterprise support)
 
-### Troubleshooting
-Common issues and solutions:
-
-1. **MongoDB Connection Issues**
-   ```bash
-   # Check MongoDB status
-   ./setup-mongodb.sh
-   ```
-
-2. **Port Already in Use**
-   ```bash
-   # Kill process on port 8000
-   lsof -ti:8000 | xargs kill -9
-   ```
-
-3. **Docker Issues**
-   ```bash
-   # Reset Docker environment
-   docker-compose down -v
-   docker system prune -f
-   ```
-
 ## 🎯 Roadmap
 
 ### Version 2.0 (Q2 2024)

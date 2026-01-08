@@ -1,4 +1,6 @@
-# Railway-optimized Dockerfile for EmergePOS
+# Railway-optimized Dockerfile - Production build for Railway platform
+# Use this for: Railway deployments (uses PORT environment variable)
+# Build: Automatically built by Railway
 # Multi-stage build for production optimization
 
 # Stage 1: Build React Frontend

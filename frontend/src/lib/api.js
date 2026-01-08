@@ -2,14 +2,30 @@ import axios from 'axios';
 
 // In production, frontend is served from same origin as backend
 // Use empty string to make requests to same origin, or use env variable if set
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+let BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// If BACKEND_URL is empty, use same origin (for same-port setup)
+// Normalize 0.0.0.0 to localhost to avoid CORS issues
+if (!BACKEND_URL) {
+  const origin = window.location.origin;
+  // Replace 0.0.0.0 with localhost to avoid CORS issues
+  BACKEND_URL = origin.replace(/0\.0\.0\.0/, 'localhost');
+}
+
 export const API_BASE = `${BACKEND_URL}/api`;
+
+// Log API configuration for debugging
+console.log('[API Config] BACKEND_URL:', BACKEND_URL || '(empty - same origin)');
+console.log('[API Config] API_BASE:', API_BASE);
+console.log('[API Config] Current origin:', window.location.origin);
+console.log('[API Config] Normalized origin:', BACKEND_URL);
 
 const api = axios.create({
   baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // 30 second timeout
 });
 
 // Add token to requests
@@ -17,18 +33,54 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem('pos_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    console.log(`[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url} - Token: ${token.substring(0, 20)}...`);
+  } else {
+    console.warn(`[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url} - NO TOKEN FOUND!`);
+    console.warn('[API] localStorage keys:', Object.keys(localStorage));
   }
+  console.log(`[API] Request headers:`, config.headers);
   return config;
+}, (error) => {
+  console.error('[API] Request error:', error);
+  return Promise.reject(error);
 });
 
 // Handle 401 errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`[API] Response ${response.status} from ${response.config.url}`);
+    return response;
+  },
   (error) => {
+    console.error('[API] Response error:', {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      url: error.config?.url,
+      baseURL: error.config?.baseURL,
+    });
+    
+    if (error.code === 'ECONNABORTED') {
+      console.error('[API] Request timeout');
+      error.message = 'Request timeout - server is not responding';
+    } else if (error.code === 'ERR_NETWORK' || error.message?.includes('blocked') || error.message?.includes('CORS')) {
+      console.error('[API] Network/CORS error');
+      error.message = 'Network error - request was blocked. Check CORS settings and ensure backend is running.';
+      error.isBlocked = true;
+    } else if (!error.response) {
+      // No response means request never reached server
+      console.error('[API] No response from server');
+      error.message = 'Cannot connect to server. Is the backend running?';
+    }
+    
     if (error.response?.status === 401) {
       localStorage.removeItem('pos_token');
       localStorage.removeItem('pos_user');
-      window.location.href = '/login';
+      // Don't redirect if we're already on login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -74,6 +126,86 @@ export const productAPI = {
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
   getBrands: () => api.get('/products/brands'),
+  downloadTemplate: async () => {
+    const token = localStorage.getItem('pos_token');
+    
+    // Create an AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    try {
+      const response = await fetch(`${API_BASE}/products/template`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        let errorMessage = 'Failed to download template';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const blob = await response.blob();
+      
+      // Check if blob is valid
+      if (blob.size === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'product_import_template.xlsx';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }, 100);
+      
+      return blob;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error('Template download error:', error);
+      
+      if (error.name === 'AbortError') {
+        throw new Error('Download timeout - please try again');
+      }
+      
+      throw error;
+    }
+  },
+  importFromExcel: (file) => {
+    const token = localStorage.getItem('pos_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetch(`${API_BASE}/products/import`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) {
+        return Promise.reject({ detail: data.detail || 'Failed to import products' });
+      }
+      return data;
+    });
+  },
 };
 
 // Stock APIs
@@ -125,6 +257,10 @@ export const analyticsAPI = {
   getSalesTrend: (params) => api.get('/analytics/sales-trend', { params }),
   getTopProducts: (params) => api.get('/analytics/top-products', { params }),
   getDashboard: (storeId) => api.get('/analytics/dashboard', { params: { store_id: storeId } }),
+  getSalesPerProduct: (params) => api.get('/analytics/sales-per-product', { params }),
+  getProfitPerProduct: (params) => api.get('/analytics/profit-per-product', { params }),
+  getSalesPerBranch: (params) => api.get('/analytics/sales-per-branch', { params }),
+  getProfitPerBranch: (params) => api.get('/analytics/profit-per-branch', { params }),
 };
 
 // Print APIs
