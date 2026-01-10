@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { productAPI, transactionAPI, sessionAPI, orgAPI, creditNoteAPI } from '@/lib/api';
 import { useStoreSelection, useCartStore, useOfflineStore, useAuthStore } from '@/lib/store';
-import { openPrintWindow, getPrinterStatus, connectUSBPrinter, printReceipt } from '@/lib/printer';
+import { openPrintWindow, getPrinterStatus, connectUSBPrinter, connectRawBTPrinter, printReceipt } from '@/lib/printer';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -402,9 +402,20 @@ export function POS() {
   const handleConnectPrinter = async () => {
     try {
       await connectUSBPrinter();
-      toast.success('Printer connected');
+      toast.success('USB Printer connected');
     } catch (error) {
-      toast.error('Failed to connect printer: ' + error.message);
+      toast.error('Failed to connect USB printer: ' + error.message);
+    }
+  };
+
+  const handleConnectRawBT = async () => {
+    try {
+      // Try default RawBT URL (localhost:8080 on Android)
+      // If using a different device/IP, you can pass a custom URL
+      await connectRawBTPrinter();
+      toast.success('RawBT printer connected');
+    } catch (error) {
+      toast.error('Failed to connect RawBT printer: ' + error.message + '. Make sure RawBT app is installed and running on your Android device.');
     }
   };
 
@@ -825,14 +836,21 @@ export function POS() {
         {/* Receipt Header - Hidden in print */}
         <div className="flex items-center justify-between p-3 bg-slate-900 text-white print:hidden">
           <h2 className="text-lg font-bold">Receipt</h2>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {printerStatus.serialSupported && !printerStatus.connected && (
               <Button onClick={handleConnectPrinter} variant="outline" className="text-white border-white hover:bg-slate-800">
-                <Usb className="w-4 h-4 mr-2" /> Connect Printer
+                <Usb className="w-4 h-4 mr-2" /> Connect USB
+              </Button>
+            )}
+            {printerStatus.rawbtSupported && !printerStatus.connected && (
+              <Button onClick={handleConnectRawBT} variant="outline" className="text-white border-white hover:bg-slate-800">
+                <Printer className="w-4 h-4 mr-2" /> Connect RawBT
               </Button>
             )}
             {printerStatus.connected && (
-              <Badge className="bg-emerald-600 mr-2">USB Printer Connected</Badge>
+              <Badge className="bg-emerald-600 mr-2">
+                {printerStatus.type === 'rawbt' ? 'RawBT Connected' : printerStatus.type === 'usb' ? 'USB Printer Connected' : 'Printer Connected'}
+              </Badge>
             )}
             <Button onClick={handlePrint} className="bg-emerald-600 hover:bg-emerald-700">
               <Printer className="w-4 h-4 mr-2" /> Print

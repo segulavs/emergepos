@@ -1,5 +1,5 @@
 // Printer utilities for thermal receipt printers
-// Supports: Browser print, Web Serial API (USB), and Bluetooth (Web Bluetooth API)
+// Supports: Browser print, Web Serial API (USB), Bluetooth (Web Bluetooth API), and RawBT (Android)
 
 // ESC/POS Commands for thermal printers
 const ESC = '\x1B';
@@ -25,13 +25,125 @@ const COMMANDS = {
 // Printer connection state
 let serialPort = null;
 let printerWriter = null;
-let printerType = 'browser'; // 'browser', 'usb', 'bluetooth'
+let printerType = 'browser'; // 'browser', 'usb', 'bluetooth', 'rawbt'
+let rawbtUrl = 'http://localhost:8080/'; // RawBT default endpoint
 
 // Check if Web Serial API is available
 export const isSerialSupported = () => 'serial' in navigator;
 
 // Check if Web Bluetooth is available
 export const isBluetoothSupported = () => 'bluetooth' in navigator;
+
+// Check if RawBT is available (for Android devices)
+export const checkRawBTAvailable = async () => {
+  try {
+    // RawBT runs on localhost:8080 on Android devices
+    const response = await fetch(rawbtUrl, {
+      method: 'HEAD',
+      mode: 'no-cors', // CORS might block, but we just need to check availability
+      cache: 'no-cache'
+    });
+    return true;
+  } catch (error) {
+    // Try a simple test to see if RawBT endpoint is reachable
+    // In practice, you'd attempt a connection and handle the error gracefully
+    return false;
+  }
+};
+
+// Connect to RawBT printer (Android)
+export const connectRawBTPrinter = async (customUrl = null) => {
+  if (customUrl) {
+    rawbtUrl = customUrl;
+  }
+  
+  try {
+    // Test connection by sending a simple ESC/POS command
+    const testData = COMMANDS.INIT;
+    const response = await sendToRawBT(testData);
+    
+    if (response.success) {
+      printerType = 'rawbt';
+      return { success: true, type: 'rawbt', url: rawbtUrl };
+    } else {
+      throw new Error('RawBT connection test failed');
+    }
+  } catch (error) {
+    console.error('RawBT printer connection failed:', error);
+    throw new Error(`RawBT not available. Make sure RawBT app is installed and running on your Android device. Error: ${error.message}`);
+  }
+};
+
+// Send data to RawBT printer via HTTP POST
+const sendToRawBT = async (escPosData) => {
+  try {
+    // Convert ESC/POS string to base64 (RawBT accepts base64 encoded ESC/POS data)
+    // This is the standard format for RawBT API
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(escPosData);
+    
+    // Convert Uint8Array to base64
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Data = btoa(binary);
+    
+    // RawBT endpoint expects base64 encoded ESC/POS data as plain text
+    // Try with proper CORS first (same origin on Android device)
+    try {
+      const response = await fetch(rawbtUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        body: base64Data,
+      });
+      
+      if (response.ok || response.status === 200 || response.status === 0) {
+        return { success: true };
+      }
+      throw new Error(`RawBT responded with status: ${response.status}`);
+    } catch (corsError) {
+      // If CORS fails, try with no-cors mode (for cross-origin scenarios)
+      // Note: With no-cors, we can't verify success, but we'll attempt the request
+      console.warn('CORS error, trying no-cors mode:', corsError);
+      
+      const response = await fetch(rawbtUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        body: base64Data,
+        mode: 'no-cors', // Fallback for cross-origin scenarios
+      });
+      
+      // With no-cors mode, response is opaque, but if no error is thrown, assume success
+      return { success: true };
+    }
+  } catch (error) {
+    console.error('RawBT send failed:', error);
+    
+    // Alternative: Try sending as raw binary (some RawBT configurations accept this)
+    try {
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(escPosData);
+      
+      const response = await fetch(rawbtUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        body: bytes,
+        mode: 'no-cors'
+      });
+      
+      return { success: true };
+    } catch (altError) {
+      throw new Error(`Failed to send to RawBT. Make sure RawBT app is running at ${rawbtUrl}. Error: ${altError.message}`);
+    }
+  }
+};
 
 // Connect to USB printer via Web Serial API
 export const connectUSBPrinter = async () => {
@@ -236,6 +348,19 @@ export const printReceipt = async (receipt, settings = {}) => {
       printBrowserReceipt(receipt, settings);
       return { success: true, method: 'browser-fallback' };
     
+    case 'rawbt':
+      try {
+        const formatted = formatThermalReceipt(receipt, settings);
+        console.log('Sending receipt to RawBT printer...');
+        await sendToRawBT(formatted);
+        return { success: true, method: 'rawbt' };
+      } catch (error) {
+        console.error('RawBT print failed:', error);
+        // Fallback to browser print
+        printBrowserReceipt(receipt, settings);
+        return { success: true, method: 'browser-fallback', error: error.message };
+      }
+    
     case 'browser':
     default:
       printBrowserReceipt(receipt, settings);
@@ -254,10 +379,17 @@ export const printBrowserReceipt = (receipt, settings = {}) => {
 export const getPrinterStatus = () => {
   return {
     type: printerType,
-    connected: printerType !== 'browser' && printerWriter !== null,
+    connected: printerType !== 'browser' && (printerWriter !== null || printerType === 'rawbt'),
     serialSupported: isSerialSupported(),
-    bluetoothSupported: isBluetoothSupported()
+    bluetoothSupported: isBluetoothSupported(),
+    rawbtSupported: true, // Always available on Android if RawBT app is installed
+    rawbtUrl: printerType === 'rawbt' ? rawbtUrl : null
   };
+};
+
+// Set RawBT URL (useful if using custom IP/port)
+export const setRawBTUrl = (url) => {
+  rawbtUrl = url;
 };
 
 // Generate receipt HTML for browser printing
