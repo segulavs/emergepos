@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStoreSelection, useOrgStore } from '@/lib/store';
 import { transactionAPI, printAPI, creditNoteAPI } from '@/lib/api';
+import { printReceipt, getPrinterStatus, openPrintWindow } from '@/lib/printer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -107,11 +108,50 @@ export function Transactions() {
   const handlePrint = async (transaction) => {
     try {
       const response = await printAPI.getReceipt(transaction.id);
-      // In a real app, this would send to a printer
-      console.log('Receipt data:', response.data);
-      toast.success('Receipt printed! (Mock - check console)');
+      const receiptData = response.data;
+      
+      // Extract receipt data from API response
+      // The API returns raw_data.transaction which has the full transaction data
+      const receipt = receiptData.raw_data?.transaction || transaction;
+      const org = receiptData.raw_data?.header || {};
+      const store = selectedStore;
+      
+      // Prepare print settings
+      const settings = {
+        storeName: store?.name || org.store_name || 'Store',
+        storeAddress: store?.address?.city 
+          ? `${store.address.city}, ${store.address.country || ''}`.trim()
+          : org.address?.street || '',
+        currencySymbol: currencySymbol,
+        invoiceLogo: organization?.settings?.invoice_logo || null
+      };
+      
+      // Check if printer is connected
+      const printerStatus = getPrinterStatus();
+      
+      if (printerStatus.connected) {
+        // Use thermal printer (USB, Bluetooth, or RawBT)
+        try {
+          const result = await printReceipt(receipt, settings);
+          if (result.success) {
+            toast.success(`Receipt printed via ${result.method}!`);
+          } else {
+            throw new Error('Print failed');
+          }
+        } catch (printError) {
+          console.error('Thermal print failed, falling back to browser print:', printError);
+          // Fallback to browser print
+          openPrintWindow(receipt, settings);
+          toast.info('Receipt opened for printing');
+        }
+      } else {
+        // No printer connected, use browser print
+        openPrintWindow(receipt, settings);
+        toast.info('Receipt opened for printing');
+      }
     } catch (error) {
-      toast.error('Failed to print receipt');
+      console.error('Print error:', error);
+      toast.error('Failed to print receipt: ' + (error.response?.data?.detail || error.message));
     }
   };
 
