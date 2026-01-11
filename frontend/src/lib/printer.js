@@ -26,7 +26,8 @@ const COMMANDS = {
 let serialPort = null;
 let printerWriter = null;
 let printerType = 'browser'; // 'browser', 'usb', 'bluetooth', 'rawbt'
-let rawbtUrl = 'http://localhost:8080/'; // RawBT default endpoint
+let rawbtUrl = 'http://localhost:8080'; // RawBT default endpoint (no trailing slash)
+let rawbtConnected = false; // Track RawBT connection status
 
 // Check if Web Serial API is available
 export const isSerialSupported = () => 'serial' in navigator;
@@ -54,95 +55,109 @@ export const checkRawBTAvailable = async () => {
 // Connect to RawBT printer (Android)
 export const connectRawBTPrinter = async (customUrl = null) => {
   if (customUrl) {
-    rawbtUrl = customUrl;
+    // Remove trailing slash if present
+    rawbtUrl = customUrl.replace(/\/$/, '');
   }
   
   try {
-    // Test connection by sending a simple ESC/POS command
-    const testData = COMMANDS.INIT;
+    // Test connection by sending a simple ESC/POS init command
+    // This is a minimal test to verify RawBT is responding
+    const testData = COMMANDS.INIT + COMMANDS.FEED_LINE;
     const response = await sendToRawBT(testData);
     
     if (response.success) {
       printerType = 'rawbt';
+      rawbtConnected = true;
+      console.log('RawBT printer connected successfully at:', rawbtUrl);
       return { success: true, type: 'rawbt', url: rawbtUrl };
     } else {
       throw new Error('RawBT connection test failed');
     }
   } catch (error) {
+    printerType = 'browser';
+    rawbtConnected = false;
     console.error('RawBT printer connection failed:', error);
     throw new Error(`RawBT not available. Make sure RawBT app is installed and running on your Android device. Error: ${error.message}`);
   }
 };
 
+// Disconnect RawBT printer
+export const disconnectRawBTPrinter = () => {
+  if (printerType === 'rawbt') {
+    printerType = 'browser';
+    rawbtConnected = false;
+  }
+};
+
 // Send data to RawBT printer via HTTP POST
+// RawBT accepts ESC/POS data in multiple formats
 const sendToRawBT = async (escPosData) => {
-  try {
-    // Convert ESC/POS string to base64 (RawBT accepts base64 encoded ESC/POS data)
-    // This is the standard format for RawBT API
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(escPosData);
-    
-    // Convert Uint8Array to base64
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const base64Data = btoa(binary);
-    
-    // RawBT endpoint expects base64 encoded ESC/POS data as plain text
-    // Try with proper CORS first (same origin on Android device)
+  // Convert ESC/POS string to bytes
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(escPosData);
+  
+  // Convert to base64 for RawBT
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64Data = btoa(binary);
+  
+  // Try multiple RawBT endpoints and formats
+  const endpoints = [
+    { url: `${rawbtUrl}/print`, contentType: 'text/plain', body: base64Data },
+    { url: rawbtUrl, contentType: 'text/plain', body: base64Data },
+    { url: `${rawbtUrl}/print`, contentType: 'application/octet-stream', body: bytes },
+    { url: rawbtUrl, contentType: 'application/octet-stream', body: bytes },
+  ];
+  
+  let lastError = null;
+  
+  for (const endpoint of endpoints) {
     try {
-      const response = await fetch(rawbtUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-        body: base64Data,
-      });
+      console.log(`Trying RawBT endpoint: ${endpoint.url} with ${endpoint.contentType}`);
       
-      if (response.ok || response.status === 200 || response.status === 0) {
+      // First try with CORS
+      try {
+        const response = await fetch(endpoint.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': endpoint.contentType,
+          },
+          body: endpoint.body,
+        });
+        
+        if (response.ok || response.status === 200) {
+          console.log('RawBT print successful via:', endpoint.url);
+          rawbtConnected = true;
+          return { success: true };
+        }
+      } catch (corsError) {
+        // Try with no-cors mode
+        console.log('CORS error, trying no-cors mode for:', endpoint.url);
+        
+        const response = await fetch(endpoint.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': endpoint.contentType,
+          },
+          body: endpoint.body,
+          mode: 'no-cors',
+        });
+        
+        // With no-cors, response is opaque, assume success if no error
+        console.log('RawBT print sent (no-cors mode) via:', endpoint.url);
+        rawbtConnected = true;
         return { success: true };
       }
-      throw new Error(`RawBT responded with status: ${response.status}`);
-    } catch (corsError) {
-      // If CORS fails, try with no-cors mode (for cross-origin scenarios)
-      // Note: With no-cors, we can't verify success, but we'll attempt the request
-      console.warn('CORS error, trying no-cors mode:', corsError);
-      
-      const response = await fetch(rawbtUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-        body: base64Data,
-        mode: 'no-cors', // Fallback for cross-origin scenarios
-      });
-      
-      // With no-cors mode, response is opaque, but if no error is thrown, assume success
-      return { success: true };
-    }
-  } catch (error) {
-    console.error('RawBT send failed:', error);
-    
-    // Alternative: Try sending as raw binary (some RawBT configurations accept this)
-    try {
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(escPosData);
-      
-      const response = await fetch(rawbtUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-        },
-        body: bytes,
-        mode: 'no-cors'
-      });
-      
-      return { success: true };
-    } catch (altError) {
-      throw new Error(`Failed to send to RawBT. Make sure RawBT app is running at ${rawbtUrl}. Error: ${altError.message}`);
+    } catch (error) {
+      lastError = error;
+      console.warn(`RawBT endpoint ${endpoint.url} failed:`, error.message);
     }
   }
+  
+  rawbtConnected = false;
+  throw new Error(`Failed to send to RawBT. Make sure RawBT app is running at ${rawbtUrl}. Error: ${lastError?.message || 'Unknown error'}`);
 };
 
 // Connect to USB printer via Web Serial API
@@ -352,13 +367,14 @@ export const printReceipt = async (receipt, settings = {}) => {
       try {
         const formatted = formatThermalReceipt(receipt, settings);
         console.log('Sending receipt to RawBT printer...');
+        console.log('Receipt data length:', formatted.length, 'bytes');
         await sendToRawBT(formatted);
         return { success: true, method: 'rawbt' };
       } catch (error) {
         console.error('RawBT print failed:', error);
-        // Fallback to browser print
-        printBrowserReceipt(receipt, settings);
-        return { success: true, method: 'browser-fallback', error: error.message };
+        rawbtConnected = false;
+        // Don't fallback automatically, let the caller decide
+        throw error;
       }
     
     case 'browser':
@@ -377,13 +393,15 @@ export const printBrowserReceipt = (receipt, settings = {}) => {
 
 // Get current printer status
 export const getPrinterStatus = () => {
+  const isConnected = printerType === 'rawbt' ? rawbtConnected : (printerWriter !== null);
   return {
     type: printerType,
-    connected: printerType !== 'browser' && (printerWriter !== null || printerType === 'rawbt'),
+    connected: printerType !== 'browser' && isConnected,
     serialSupported: isSerialSupported(),
     bluetoothSupported: isBluetoothSupported(),
     rawbtSupported: true, // Always available on Android if RawBT app is installed
-    rawbtUrl: printerType === 'rawbt' ? rawbtUrl : null
+    rawbtUrl: rawbtUrl,
+    rawbtConnected: rawbtConnected
   };
 };
 

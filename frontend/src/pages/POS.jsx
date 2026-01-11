@@ -322,10 +322,12 @@ export function POS() {
         notes: ''
       };
 
+      let newReceipt = null;
+      
       if (isOnline) {
         const response = await transactionAPI.create(selectedStore.id, transactionData);
         // Ensure items have brand field from cart items
-        const receiptData = {
+        newReceipt = {
           ...response.data,
           items: (response.data.items || []).map(item => {
             // Find matching cart item to preserve brand
@@ -338,7 +340,7 @@ export function POS() {
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim()
         };
-        setLastReceipt(receiptData);
+        setLastReceipt(newReceipt);
         setShowReceipt(true);
       } else {
         addPendingTransaction({
@@ -347,8 +349,7 @@ export function POS() {
           created_at: new Date().toISOString()
         });
         toast.info('Saved offline. Will sync when online.');
-        setShowReceipt(true);
-        setLastReceipt({
+        newReceipt = {
           receipt_number: `OFF-${Date.now()}`,
           items: cart.items.map(item => ({
             ...item,
@@ -358,7 +359,9 @@ export function POS() {
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim(),
           created_at: new Date().toISOString()
-        });
+        };
+        setLastReceipt(newReceipt);
+        setShowReceipt(true);
       }
       
       cart.clearCart();
@@ -366,6 +369,24 @@ export function POS() {
       setPaymentAmount('');
       setPaymentReference('');
       loadProducts();
+      
+      // Auto-print receipt if RawBT is connected
+      const printerStatus = getPrinterStatus();
+      if (printerStatus.connected && printerStatus.type === 'rawbt' && newReceipt) {
+        try {
+          const printSettings = {
+            storeName: selectedStore?.name,
+            storeAddress: selectedStore?.address?.city ? `${selectedStore.address.city}, ${selectedStore.address.country}` : '',
+            currencySymbol,
+            invoiceLogo
+          };
+          await printReceipt(newReceipt, printSettings);
+          toast.success('Receipt printed via RawBT');
+        } catch (printError) {
+          console.error('Auto-print failed:', printError);
+          toast.error('Failed to auto-print receipt. You can print manually from the receipt screen.');
+        }
+      }
     } catch (error) {
       const errorDetail = error.response?.data?.detail;
       toast.error(typeof errorDetail === 'string' ? errorDetail : 'Payment failed');
@@ -388,11 +409,14 @@ export function POS() {
     const printerStatus = getPrinterStatus();
     if (printerStatus.connected) {
       try {
-        await printReceipt(lastReceipt, settings);
-        toast.success('Receipt printed');
+        const result = await printReceipt(lastReceipt, settings);
+        toast.success(`Receipt printed via ${result.method}`);
       } catch (error) {
+        console.error('Print failed:', error);
+        toast.error('RawBT print failed: ' + error.message);
         // Fallback to browser print
         openPrintWindow(lastReceipt, settings);
+        toast.info('Opened receipt for browser printing instead');
       }
     } else {
       openPrintWindow(lastReceipt, settings);

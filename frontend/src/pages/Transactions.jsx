@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStoreSelection, useOrgStore } from '@/lib/store';
 import { transactionAPI, printAPI, creditNoteAPI } from '@/lib/api';
-import { printReceipt, getPrinterStatus, openPrintWindow } from '@/lib/printer';
+import { printReceipt, getPrinterStatus, openPrintWindow, connectRawBTPrinter } from '@/lib/printer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,7 +33,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
-import { FileText, RotateCcw } from 'lucide-react';
+import { FileText, RotateCcw, Printer } from 'lucide-react';
 
 export function Transactions() {
   const { selectedStore } = useStoreSelection();
@@ -51,8 +51,22 @@ export function Transactions() {
   // Credit note state
   const [creditNoteItems, setCreditNoteItems] = useState([]);
   const [creditNoteReason, setCreditNoteReason] = useState('');
+  
+  // Printer state
+  const [printerStatus, setPrinterStatus] = useState(getPrinterStatus());
 
   const currencySymbol = organization?.settings?.currency_symbol || 'K';
+  
+  // Handle RawBT connection
+  const handleConnectRawBT = async () => {
+    try {
+      await connectRawBTPrinter();
+      setPrinterStatus(getPrinterStatus());
+      toast.success('RawBT printer connected');
+    } catch (error) {
+      toast.error('Failed to connect RawBT: ' + error.message);
+    }
+  };
 
   useEffect(() => {
     if (selectedStore) {
@@ -126,28 +140,42 @@ export function Transactions() {
         invoiceLogo: organization?.settings?.invoice_logo || null
       };
       
-      // Check if printer is connected
-      const printerStatus = getPrinterStatus();
+      // Refresh and check printer status
+      const currentPrinterStatus = getPrinterStatus();
+      setPrinterStatus(currentPrinterStatus);
       
-      if (printerStatus.connected) {
-        // Use thermal printer (USB, Bluetooth, or RawBT)
+      if (currentPrinterStatus.connected && currentPrinterStatus.type === 'rawbt') {
+        // Use RawBT printer
+        try {
+          const result = await printReceipt(receipt, settings);
+          if (result.success) {
+            toast.success(`Receipt printed via RawBT!`);
+          }
+        } catch (printError) {
+          console.error('RawBT print failed:', printError);
+          toast.error('RawBT print failed: ' + printError.message);
+          // Update printer status
+          setPrinterStatus(getPrinterStatus());
+          // Fallback to browser print
+          openPrintWindow(receipt, settings);
+          toast.info('Opened receipt for browser printing instead');
+        }
+      } else if (currentPrinterStatus.connected) {
+        // Use USB/Bluetooth printer
         try {
           const result = await printReceipt(receipt, settings);
           if (result.success) {
             toast.success(`Receipt printed via ${result.method}!`);
-          } else {
-            throw new Error('Print failed');
           }
         } catch (printError) {
-          console.error('Thermal print failed, falling back to browser print:', printError);
-          // Fallback to browser print
+          console.error('Print failed, falling back to browser print:', printError);
           openPrintWindow(receipt, settings);
           toast.info('Receipt opened for printing');
         }
       } else {
         // No printer connected, use browser print
         openPrintWindow(receipt, settings);
-        toast.info('Receipt opened for printing');
+        toast.info('Receipt opened for printing. Connect RawBT for thermal printing.');
       }
     } catch (error) {
       console.error('Print error:', error);
@@ -249,9 +277,22 @@ export function Transactions() {
           <h1 className="text-2xl font-bold text-slate-900">Transactions</h1>
           <p className="text-slate-500">{selectedStore.name} - Sales History</p>
         </div>
-        <Button variant="outline" onClick={() => { loadTransactions(); loadCreditNotes(); }}>
-          Refresh
-        </Button>
+        <div className="flex gap-2 items-center">
+          {/* RawBT Connection Button */}
+          {!printerStatus.connected ? (
+            <Button variant="outline" onClick={handleConnectRawBT}>
+              <Printer className="w-4 h-4 mr-2" /> Connect RawBT
+            </Button>
+          ) : (
+            <Badge className="bg-emerald-600 text-white px-3 py-1">
+              <Printer className="w-3 h-3 mr-1" />
+              {printerStatus.type === 'rawbt' ? 'RawBT Connected' : 'Printer Connected'}
+            </Badge>
+          )}
+          <Button variant="outline" onClick={() => { loadTransactions(); loadCreditNotes(); setPrinterStatus(getPrinterStatus()); }}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
