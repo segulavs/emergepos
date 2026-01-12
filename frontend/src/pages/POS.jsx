@@ -370,9 +370,8 @@ export function POS() {
       setPaymentReference('');
       loadProducts();
       
-      // Auto-print receipt if RawBT is connected
-      const printerStatus = getPrinterStatus();
-      if (printerStatus.connected && printerStatus.type === 'rawbt' && newReceipt) {
+      // Auto-print receipt automatically without confirmations
+      if (newReceipt) {
         try {
           const printSettings = {
             storeName: selectedStore?.name,
@@ -380,11 +379,27 @@ export function POS() {
             currencySymbol,
             invoiceLogo
           };
-          await printReceipt(newReceipt, printSettings);
-          toast.success('Receipt printed via RawBT');
+          
+          const printerStatus = getPrinterStatus();
+          
+          // Try to print automatically - try connected printer first, then fallback to browser print
+          if (printerStatus.connected) {
+            // Use connected printer (RawBT, USB, etc.)
+            try {
+              await printReceipt(newReceipt, printSettings);
+              // Print successful, no need to show toast
+            } catch (printError) {
+              console.error('Auto-print failed, falling back to browser print:', printError);
+              // Fallback to browser print
+              openPrintWindow(newReceipt, printSettings);
+            }
+          } else {
+            // No printer connected, use browser print
+            openPrintWindow(newReceipt, printSettings);
+          }
         } catch (printError) {
           console.error('Auto-print failed:', printError);
-          toast.error('Failed to auto-print receipt. You can print manually from the receipt screen.');
+          // Silently fail - receipt is still shown on screen
         }
       }
     } catch (error) {
