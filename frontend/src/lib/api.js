@@ -241,6 +241,14 @@ export const sessionAPI = {
   getReport: (sessionId) => api.get(`/sessions/${sessionId}/report`),
 };
 
+// Print Log APIs
+export const printLogAPI = {
+  create: (data) => api.post('/print-logs', data),
+  getAll: (params) => api.get('/print-logs', { params }),
+  getAll: (storeId) => api.get('/sessions', { params: { store_id: storeId } }),
+  getReport: (sessionId) => api.get(`/sessions/${sessionId}/report`),
+};
+
 // Audit APIs
 export const auditAPI = {
   getAll: (params) => api.get('/audits', { params }),

@@ -1,5 +1,6 @@
 // Printer utilities for thermal receipt printers
 // Supports: Browser print, Web Serial API (USB), Bluetooth (Web Bluetooth API), and RawBT (Android)
+import { logPrintInfo, logPrintWarn, logPrintError, logPrintDebug } from './printLogger';
 
 // ESC/POS Commands for thermal printers
 const ESC = '\x1B';
@@ -54,29 +55,45 @@ export const checkRawBTAvailable = async () => {
 
 // Connect to RawBT printer (Android)
 export const connectRawBTPrinter = async (customUrl = null) => {
+  logPrintInfo('CONNECT-RAWBT', 'Starting RawBT connection', {
+    custom_url: customUrl,
+    current_rawbt_url: rawbtUrl
+  });
+  
   if (customUrl) {
     // Remove trailing slash if present
     rawbtUrl = customUrl.replace(/\/$/, '');
+    logPrintDebug('CONNECT-RAWBT', 'Updated RawBT URL', { new_url: rawbtUrl });
   }
   
   try {
     // Test connection by sending a simple ESC/POS init command
     // This is a minimal test to verify RawBT is responding
+    logPrintInfo('CONNECT-RAWBT', 'Testing connection with init command', {});
     const testData = COMMANDS.INIT + COMMANDS.FEED_LINE;
+    logPrintDebug('CONNECT-RAWBT', 'Test data prepared', { test_data_length: testData.length });
     const response = await sendToRawBT(testData);
+    
+    logPrintDebug('CONNECT-RAWBT', 'Connection test response', { response });
     
     if (response.success) {
       printerType = 'rawbt';
       rawbtConnected = true;
-      console.log('RawBT printer connected successfully at:', rawbtUrl);
+      logPrintInfo('CONNECT-RAWBT', 'SUCCESS - RawBT printer connected', { rawbt_url: rawbtUrl });
       return { success: true, type: 'rawbt', url: rawbtUrl };
     } else {
+      logPrintError('CONNECT-RAWBT', 'Connection test failed - response not successful', {});
       throw new Error('RawBT connection test failed');
     }
   } catch (error) {
     printerType = 'browser';
     rawbtConnected = false;
-    console.error('RawBT printer connection failed:', error);
+    logPrintError('CONNECT-RAWBT', 'Connection failed', {
+      error: error.message,
+      stack: error.stack,
+      name: error.name,
+      rawbt_url: rawbtUrl
+    });
     throw new Error(`RawBT not available. Make sure RawBT app is installed and running on your Android device. Error: ${error.message}`);
   }
 };
@@ -92,9 +109,15 @@ export const disconnectRawBTPrinter = () => {
 // Send data to RawBT printer via HTTP POST
 // RawBT accepts ESC/POS data in multiple formats
 const sendToRawBT = async (escPosData) => {
+  logPrintInfo('SEND-RAWBT', 'Starting sendToRawBT', {
+    rawbt_url: rawbtUrl,
+    input_data_length: escPosData.length
+  });
+  
   // Convert ESC/POS string to bytes
   const encoder = new TextEncoder();
   const bytes = encoder.encode(escPosData);
+  logPrintDebug('SEND-RAWBT', 'Encoded to bytes', { bytes_length: bytes.length });
   
   // Convert to base64 for RawBT
   let binary = '';
@@ -102,6 +125,7 @@ const sendToRawBT = async (escPosData) => {
     binary += String.fromCharCode(bytes[i]);
   }
   const base64Data = btoa(binary);
+  logPrintDebug('SEND-RAWBT', 'Converted to base64', { base64_length: base64Data.length });
   
   // Try multiple RawBT endpoints and formats
   const endpoints = [
@@ -111,14 +135,22 @@ const sendToRawBT = async (escPosData) => {
     { url: rawbtUrl, contentType: 'application/octet-stream', body: bytes },
   ];
   
+  logPrintInfo('SEND-RAWBT', `Will try ${endpoints.length} endpoints`, { endpoint_count: endpoints.length });
+  
   let lastError = null;
+  let attemptCount = 0;
   
   for (const endpoint of endpoints) {
+    attemptCount++;
+    logPrintDebug('SEND-RAWBT', `Attempt ${attemptCount}/${endpoints.length}`, {
+      url: endpoint.url,
+      content_type: endpoint.contentType
+    });
+    
     try {
-      console.log(`Trying RawBT endpoint: ${endpoint.url} with ${endpoint.contentType}`);
-      
       // First try with CORS
       try {
+        logPrintDebug('SEND-RAWBT', 'Trying with CORS mode', { url: endpoint.url });
         const response = await fetch(endpoint.url, {
           method: 'POST',
           headers: {
@@ -127,14 +159,32 @@ const sendToRawBT = async (escPosData) => {
           body: endpoint.body,
         });
         
+        logPrintDebug('SEND-RAWBT', 'Received response', {
+          status: response.status,
+          ok: response.ok,
+          headers: Object.fromEntries(response.headers.entries())
+        });
+        
         if (response.ok || response.status === 200) {
-          console.log('RawBT print successful via:', endpoint.url);
+          logPrintInfo('SEND-RAWBT', 'SUCCESS', { endpoint: endpoint.url });
           rawbtConnected = true;
-          return { success: true };
+          return { success: true, endpoint: endpoint.url };
+        } else {
+          logPrintWarn('SEND-RAWBT', 'Response not OK', {
+            status: response.status,
+            url: endpoint.url
+          });
+          const responseText = await response.text().catch(() => 'Unable to read response');
+          logPrintDebug('SEND-RAWBT', 'Response body', {
+            preview: responseText.substring(0, 200)
+          });
         }
       } catch (corsError) {
         // Try with no-cors mode
-        console.log('CORS error, trying no-cors mode for:', endpoint.url);
+        logPrintWarn('SEND-RAWBT', 'CORS error, trying no-cors mode', {
+          error: corsError.message,
+          url: endpoint.url
+        });
         
         const response = await fetch(endpoint.url, {
           method: 'POST',
@@ -146,16 +196,28 @@ const sendToRawBT = async (escPosData) => {
         });
         
         // With no-cors, response is opaque, assume success if no error
-        console.log('RawBT print sent (no-cors mode) via:', endpoint.url);
+        logPrintInfo('SEND-RAWBT', 'No-CORS request sent (opaque response), assuming success', {
+          endpoint: endpoint.url,
+          mode: 'no-cors'
+        });
         rawbtConnected = true;
-        return { success: true };
+        return { success: true, endpoint: endpoint.url, mode: 'no-cors' };
       }
     } catch (error) {
       lastError = error;
-      console.warn(`RawBT endpoint ${endpoint.url} failed:`, error.message);
+      logPrintError('SEND-RAWBT', `Endpoint ${endpoint.url} failed`, {
+        error: error.message,
+        stack: error.stack,
+        name: error.name,
+        url: endpoint.url
+      });
     }
   }
   
+  logPrintError('SEND-RAWBT', 'All endpoints failed', {
+    rawbt_url: rawbtUrl,
+    last_error: lastError?.message || 'Unknown error'
+  });
   rawbtConnected = false;
   throw new Error(`Failed to send to RawBT. Make sure RawBT app is running at ${rawbtUrl}. Error: ${lastError?.message || 'Unknown error'}`);
 };
@@ -249,6 +311,13 @@ const sendToUSBPrinter = async (data) => {
 
 // Format receipt for thermal printer (ESC/POS)
 export const formatThermalReceipt = (receipt, settings = {}) => {
+  logPrintDebug('FORMAT-THERMAL', 'Starting formatThermalReceipt', {
+    receipt_number: receipt.receipt_number,
+    items_count: receipt.items?.length || 0,
+    total: receipt.total,
+    settings: settings
+  }, receipt.receipt_number);
+  
   const currencySymbol = settings.currencySymbol || 'K';
   const formatCurrency = (amount) => `${currencySymbol}${(amount || 0).toFixed(2)}`;
   
@@ -337,41 +406,78 @@ export const formatThermalReceipt = (receipt, settings = {}) => {
   // Cut paper
   output += COMMANDS.CUT_PAPER;
   
+  logPrintDebug('FORMAT-THERMAL', 'Formatted receipt complete', {
+    length: output.length,
+    first_200_chars: output.substring(0, 200),
+    last_200_chars: output.substring(Math.max(0, output.length - 200))
+  }, receipt.receipt_number);
+  
   return output;
 };
 
 // Print receipt based on connection type
 export const printReceipt = async (receipt, settings = {}) => {
+  logPrintInfo('PRINT-RECEIPT', 'Starting printReceipt function', {
+    printer_type: printerType,
+    rawbt_connected: rawbtConnected,
+    printer_writer_exists: printerWriter !== null,
+    receipt_number: receipt.receipt_number
+  }, receipt.receipt_number, receipt.id);
+  
   switch (printerType) {
     case 'usb':
+      logPrintInfo('PRINT-RECEIPT', 'Using USB printer path', {}, receipt.receipt_number);
       try {
         const formatted = formatThermalReceipt(receipt, settings);
-        // Debug: log formatted output to verify brand lines are included
-        console.log('Thermal receipt formatted output (first 500 chars):', formatted.substring(0, 500));
+        logPrintDebug('PRINT-RECEIPT', 'Formatted receipt for USB', {
+          length: formatted.length,
+          preview: formatted.substring(0, 500)
+        }, receipt.receipt_number);
         await sendToUSBPrinter(formatted);
+        logPrintInfo('PRINT-RECEIPT', 'USB print successful', {}, receipt.receipt_number);
         return { success: true, method: 'usb' };
       } catch (error) {
-        console.error('USB print failed:', error);
+        logPrintError('PRINT-RECEIPT', 'USB print failed', {
+          error: error.message,
+          stack: error.stack,
+          name: error.name
+        }, receipt.receipt_number);
         // Fallback to browser print
+        logPrintInfo('PRINT-RECEIPT', 'Falling back to browser print', {}, receipt.receipt_number);
         printBrowserReceipt(receipt, settings);
         return { success: true, method: 'browser-fallback' };
       }
     
     case 'bluetooth':
+      logPrintWarn('PRINT-RECEIPT', 'Using Bluetooth printer path (not implemented, falling back)', {}, receipt.receipt_number);
       // Bluetooth printing would be implemented here
       // For now, fall back to browser
       printBrowserReceipt(receipt, settings);
       return { success: true, method: 'browser-fallback' };
     
     case 'rawbt':
+      logPrintInfo('PRINT-RECEIPT', 'Using RawBT printer path', {
+        rawbt_url: rawbtUrl,
+        rawbt_connected: rawbtConnected
+      }, receipt.receipt_number);
       try {
         const formatted = formatThermalReceipt(receipt, settings);
-        console.log('Sending receipt to RawBT printer...');
-        console.log('Receipt data length:', formatted.length, 'bytes');
-        await sendToRawBT(formatted);
+        logPrintDebug('PRINT-RECEIPT', 'Formatted receipt for RawBT', {
+          length: formatted.length,
+          preview: formatted.substring(0, 500)
+        }, receipt.receipt_number);
+        logPrintInfo('PRINT-RECEIPT', 'Attempting to send to RawBT', {}, receipt.receipt_number);
+        const result = await sendToRawBT(formatted);
+        logPrintInfo('PRINT-RECEIPT', 'RawBT print successful', { result }, receipt.receipt_number);
         return { success: true, method: 'rawbt' };
       } catch (error) {
-        console.error('RawBT print failed:', error);
+        logPrintError('PRINT-RECEIPT', 'RawBT print failed', {
+          error: error.message,
+          stack: error.stack,
+          name: error.name,
+          rawbt_url: rawbtUrl,
+          rawbt_connected: rawbtConnected
+        }, receipt.receipt_number);
         rawbtConnected = false;
         // Don't fallback automatically, let the caller decide
         throw error;
@@ -379,6 +485,9 @@ export const printReceipt = async (receipt, settings = {}) => {
     
     case 'browser':
     default:
+      logPrintInfo('PRINT-RECEIPT', 'Using browser print path (default)', {
+        printer_type: printerType
+      }, receipt.receipt_number);
       printBrowserReceipt(receipt, settings);
       return { success: true, method: 'browser' };
   }
@@ -386,15 +495,31 @@ export const printReceipt = async (receipt, settings = {}) => {
 
 // Browser print (opens print dialog)
 export const printBrowserReceipt = (receipt, settings = {}) => {
-  // This triggers the browser's native print dialog
-  // The receipt should be displayed in a print-friendly format
-  window.print();
+  logPrintInfo('BROWSER-PRINT', 'Starting browser print', {
+    receipt_number: receipt.receipt_number,
+    user_agent: navigator.userAgent,
+    platform: navigator.platform,
+    window_print_available: typeof window.print === 'function'
+  }, receipt.receipt_number);
+  
+  try {
+    // This triggers the browser's native print dialog
+    // The receipt should be displayed in a print-friendly format
+    window.print();
+    logPrintInfo('BROWSER-PRINT', 'window.print() called successfully', {}, receipt.receipt_number);
+  } catch (error) {
+    logPrintError('BROWSER-PRINT', 'Error calling window.print()', {
+      error: error.message,
+      stack: error.stack,
+      name: error.name
+    }, receipt.receipt_number);
+  }
 };
 
 // Get current printer status
 export const getPrinterStatus = () => {
   const isConnected = printerType === 'rawbt' ? rawbtConnected : (printerWriter !== null);
-  return {
+  const status = {
     type: printerType,
     connected: printerType !== 'browser' && isConnected,
     serialSupported: isSerialSupported(),
@@ -403,6 +528,9 @@ export const getPrinterStatus = () => {
     rawbtUrl: rawbtUrl,
     rawbtConnected: rawbtConnected
   };
+  
+  logPrintDebug('GET-PRINTER-STATUS', 'Current status', status);
+  return status;
 };
 
 // Set RawBT URL (useful if using custom IP/port)
@@ -484,6 +612,8 @@ export const generateReceiptHTML = (receipt, settings = {}) => {
       <div class="separator"></div>
       <div class="center">Thank you for your purchase!</div>
       <div class="center" style="font-size: 10px; margin-top: 5px;">Powered by NG POS</div>
+      
+      <script>window.onload = function() { window.print(); }</script>
     </body>
     </html>
   `;
@@ -491,12 +621,41 @@ export const generateReceiptHTML = (receipt, settings = {}) => {
 
 // Open receipt in new window for printing
 export const openPrintWindow = (receipt, settings = {}) => {
-  const html = generateReceiptHTML(receipt, settings);
-  const printWindow = window.open('', '_blank', 'width=400,height=600');
-  printWindow.document.write(html);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
-  // Close after print dialog
-  printWindow.onafterprint = () => printWindow.close();
+  logPrintInfo('OPEN-PRINT-WINDOW', 'Starting openPrintWindow', {
+    receipt_number: receipt.receipt_number,
+    user_agent: navigator.userAgent,
+    platform: navigator.platform
+  }, receipt.receipt_number);
+  
+  try {
+    const html = generateReceiptHTML(receipt, settings);
+    logPrintDebug('OPEN-PRINT-WINDOW', 'Generated HTML', { html_length: html.length }, receipt.receipt_number);
+    
+    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    
+    if (!printWindow) {
+      logPrintError('OPEN-PRINT-WINDOW', 'Failed to open print window - popup blocked?', {}, receipt.receipt_number);
+      throw new Error('Failed to open print window. Please allow popups.');
+    }
+    
+    logPrintInfo('OPEN-PRINT-WINDOW', 'Print window opened successfully', {}, receipt.receipt_number);
+    
+    printWindow.document.write(html);
+    printWindow.document.close();
+    logPrintDebug('OPEN-PRINT-WINDOW', 'HTML written to print window', {}, receipt.receipt_number);
+    
+    // The print dialog is triggered by window.onload script in the HTML
+    // Close after print dialog
+    printWindow.onafterprint = () => {
+      logPrintInfo('OPEN-PRINT-WINDOW', 'Print dialog closed, closing window', {}, receipt.receipt_number);
+      printWindow.close();
+    };
+  } catch (error) {
+    logPrintError('OPEN-PRINT-WINDOW', 'Fatal error', {
+      error: error.message,
+      stack: error.stack,
+      name: error.name
+    }, receipt.receipt_number);
+    throw error;
+  }
 };

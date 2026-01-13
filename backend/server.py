@@ -602,6 +602,35 @@ class CashierSession(TimestampMixin):
     is_active: bool = True
     total_sales: float = 0
     total_refunds: float = 0
+
+# Print Log Models
+class PrintLog(TimestampMixin):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    organization_id: str
+    store_id: Optional[str] = None
+    session_id: Optional[str] = None
+    user_id: Optional[str] = None
+    device_id: Optional[str] = None
+    log_level: str  # 'info', 'warn', 'error', 'debug'
+    log_tag: str  # e.g., 'AUTO-PRINT', 'PRINT-RECEIPT', 'SEND-RAWBT'
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    receipt_number: Optional[str] = None
+    transaction_id: Optional[str] = None
+    user_agent: Optional[str] = None
+    platform: Optional[str] = None
+    error: Optional[Dict[str, Any]] = None
+
+class PrintLogCreate(BaseModel):
+    log_level: str
+    log_tag: str
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    receipt_number: Optional[str] = None
+    transaction_id: Optional[str] = None
+    device_id: Optional[str] = None
+    session_id: Optional[str] = None
     transaction_count: int = 0
 
 class CashierSessionCreate(BaseModel):
@@ -2698,6 +2727,86 @@ async def get_sessions(
     return [deserialize_datetime(s) for s in sessions]
 
 # ==================== DAY REPORT ROUTES ====================
+
+# ==================== PRINT LOG ROUTES ====================
+
+@api_router.post("/print-logs", response_model=PrintLog)
+async def create_print_log(
+    data: PrintLogCreate,
+    user: Dict = Depends(get_current_user)
+):
+    """Create a print log entry"""
+    # Get current session if available
+    session_id = data.session_id
+    if not session_id:
+        # Try to find active session
+        active_session = await db.cashier_sessions.find_one({
+            "cashier_id": user["id"],
+            "is_active": True
+        }, {"id": 1})
+        if active_session:
+            session_id = active_session["id"]
+    
+    # Generate device ID from user agent if not provided
+    device_id = data.device_id
+    if not device_id:
+        # Create a simple device fingerprint
+        import hashlib
+        user_agent = data.data.get("user_agent", "") if data.data else ""
+        device_id = hashlib.md5(f"{user_agent}_{user['id']}".encode()).hexdigest()[:16]
+    
+    print_log = PrintLog(
+        organization_id=user["organization_id"],
+        store_id=user.get("store_ids", [None])[0] if user.get("store_ids") else None,
+        session_id=session_id,
+        user_id=user["id"],
+        device_id=device_id,
+        log_level=data.log_level,
+        log_tag=data.log_tag,
+        message=data.message,
+        data=data.data,
+        receipt_number=data.receipt_number,
+        transaction_id=data.transaction_id,
+        user_agent=data.data.get("user_agent") if data.data else None,
+        platform=data.data.get("platform") if data.data else None,
+        error=data.data.get("error") if data.data else None
+    )
+    
+    await db.print_logs.insert_one(serialize_datetime(print_log.model_dump()))
+    return print_log
+
+@api_router.get("/print-logs", response_model=List[PrintLog])
+async def get_print_logs(
+    store_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    receipt_number: Optional[str] = None,
+    log_level: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = Query(100, le=1000),
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Get print logs with filters"""
+    query = {"organization_id": user["organization_id"]}
+    
+    if store_id:
+        query["store_id"] = store_id
+    if session_id:
+        query["session_id"] = session_id
+    if receipt_number:
+        query["receipt_number"] = receipt_number
+    if log_level:
+        query["log_level"] = log_level
+    if start_date:
+        query["created_at"] = {"$gte": start_date}
+    if end_date:
+        if "created_at" in query:
+            query["created_at"]["$lte"] = end_date
+        else:
+            query["created_at"] = {"$lte": end_date}
+    
+    logs = await db.print_logs.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return [deserialize_datetime(log) for log in logs]
 
 @api_router.get("/sessions/{session_id}/report", response_model=DayReport)
 async def get_day_report(

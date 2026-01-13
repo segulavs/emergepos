@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { productAPI, transactionAPI, sessionAPI, orgAPI, creditNoteAPI } from '@/lib/api';
 import { useStoreSelection, useCartStore, useOfflineStore, useAuthStore } from '@/lib/store';
 import { openPrintWindow, getPrinterStatus, connectUSBPrinter, connectRawBTPrinter, printReceipt } from '@/lib/printer';
+import { logPrintInfo, logPrintWarn, logPrintError, logPrintDebug, updatePrintLoggerContext } from '@/lib/printLogger';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -179,6 +180,10 @@ export function POS() {
       try {
         const response = await sessionAPI.getCurrent(selectedStore.id);
         setSession(response.data);
+        // Update print logger context
+        if (response.data) {
+          updatePrintLoggerContext(response.data.id, selectedStore.id, user?.id);
+        }
         if (!response.data) {
           setShowSessionDialog(true);
         }
@@ -187,7 +192,7 @@ export function POS() {
       }
     };
     checkSession();
-  }, [selectedStore]);
+  }, [selectedStore, user]);
 
   useEffect(() => {
     searchRef.current?.focus();
@@ -372,6 +377,13 @@ export function POS() {
       
       // Auto-print receipt automatically without confirmations
       if (newReceipt) {
+        logPrintInfo('AUTO-PRINT', 'Starting automatic print process', {
+          receipt_number: newReceipt.receipt_number,
+          total: newReceipt.total,
+          items_count: newReceipt.items?.length || 0,
+          created_at: newReceipt.created_at
+        }, newReceipt.receipt_number, newReceipt.id);
+        
         try {
           const printSettings = {
             storeName: selectedStore?.name,
@@ -380,25 +392,61 @@ export function POS() {
             invoiceLogo
           };
           
+          logPrintDebug('AUTO-PRINT', 'Print settings configured', printSettings, newReceipt.receipt_number);
+          
           const printerStatus = getPrinterStatus();
+          const isAndroid = /Android/i.test(navigator.userAgent);
+          
+          logPrintInfo('AUTO-PRINT', 'Printer status checked', {
+            type: printerStatus.type,
+            connected: printerStatus.connected,
+            serialSupported: printerStatus.serialSupported,
+            bluetoothSupported: printerStatus.bluetoothSupported,
+            rawbtSupported: printerStatus.rawbtSupported,
+            rawbtConnected: printerStatus.rawbtConnected,
+            rawbtUrl: printerStatus.rawbtUrl,
+            isAndroid: isAndroid,
+            window_location: window.location.href
+          }, newReceipt.receipt_number);
           
           // Try to print automatically - try connected printer first, then fallback to browser print
           if (printerStatus.connected) {
+            logPrintInfo('AUTO-PRINT', `Printer is connected, attempting to print via ${printerStatus.type}`, {
+              printer_type: printerStatus.type
+            }, newReceipt.receipt_number);
             // Use connected printer (RawBT, USB, etc.)
             try {
-              await printReceipt(newReceipt, printSettings);
-              // Print successful, no need to show toast
+              const printResult = await printReceipt(newReceipt, printSettings);
+              logPrintInfo('AUTO-PRINT', `Print successful via ${printerStatus.type}`, {
+                result: printResult,
+                printer_type: printerStatus.type
+              }, newReceipt.receipt_number);
             } catch (printError) {
-              console.error('Auto-print failed, falling back to browser print:', printError);
+              logPrintError('AUTO-PRINT', `Print failed via ${printerStatus.type}`, {
+                error: printError.message,
+                stack: printError.stack,
+                name: printError.name,
+                printer_type: printerStatus.type
+              }, newReceipt.receipt_number);
+              logPrintInfo('AUTO-PRINT', 'Falling back to browser print', {}, newReceipt.receipt_number);
               // Fallback to browser print
               openPrintWindow(newReceipt, printSettings);
             }
           } else {
+            logPrintInfo('AUTO-PRINT', 'No printer connected, using browser print', {
+              user_agent: navigator.userAgent,
+              platform: navigator.platform
+            }, newReceipt.receipt_number);
             // No printer connected, use browser print
             openPrintWindow(newReceipt, printSettings);
           }
         } catch (printError) {
-          console.error('Auto-print failed:', printError);
+          logPrintError('AUTO-PRINT', 'Fatal error during print process', {
+            error: printError.message,
+            stack: printError.stack,
+            name: printError.name,
+            receipt_number: newReceipt.receipt_number
+          }, newReceipt.receipt_number);
           // Silently fail - receipt is still shown on screen
         }
       }
