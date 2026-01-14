@@ -211,8 +211,89 @@ export const productAPI = {
 // Stock APIs
 export const stockAPI = {
   getByStore: (storeId) => api.get(`/stock/${storeId}`),
+  getAllStores: () => api.get('/stock/all-stores'),
   createMovement: (storeId, data) => api.post(`/stock/${storeId}/movement`, data),
   getMovements: (storeId, productId) => api.get(`/stock/${storeId}/movements`, { params: { product_id: productId } }),
+  downloadTemplate: async () => {
+    const token = localStorage.getItem('pos_token');
+    
+    // Create an AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    try {
+      const response = await fetch(`${API_BASE}/stock/upload-template`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        let errorMessage = 'Failed to download template';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const blob = await response.blob();
+      
+      // Check if blob is valid
+      if (blob.size === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'stock_upload_template.xlsx';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }, 100);
+      
+      return blob;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error('Template download error:', error);
+      
+      if (error.name === 'AbortError') {
+        throw new Error('Download timeout - please try again');
+      }
+      
+      throw error;
+    }
+  },
+  uploadFromExcel: (file) => {
+    const token = localStorage.getItem('pos_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetch(`${API_BASE}/stock/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) {
+        return Promise.reject({ detail: data.detail || 'Failed to upload stocks' });
+      }
+      return data;
+    });
+  },
 };
 
 // Transfer APIs

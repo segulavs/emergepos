@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useStoreSelection, useOrgStore } from '@/lib/store';
+import { useStoreSelection, useOrgStore, useAuthStore } from '@/lib/store';
 import { stockAPI, productAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,6 +35,7 @@ import { toast } from 'sonner';
 export function Inventory() {
   const { selectedStore } = useStoreSelection();
   const { organization } = useOrgStore();
+  const { user } = useAuthStore();
   const [stock, setStock] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -46,14 +47,20 @@ export function Inventory() {
     reason: '',
   });
   const [saving, setSaving] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   const currencySymbol = organization?.settings?.currency_symbol || 'K';
+  const canUploadStocks = ['super_admin', 'org_admin'].includes(user?.role);
 
   useEffect(() => {
     if (selectedStore) {
       loadStock();
       loadProducts();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStore]);
 
   const loadStock = async () => {
@@ -107,10 +114,153 @@ export function Inventory() {
 
   if (!selectedStore) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
+            <p className="text-slate-500">Stock Management</p>
+          </div>
+          {canUploadStocks && (
+            <div className="flex gap-2">
+              <Button 
+                onClick={async () => {
+                  setDownloadingTemplate(true);
+                  try {
+                    await stockAPI.downloadTemplate();
+                    toast.success('Template downloaded successfully!');
+                  } catch (error) {
+                    toast.error(error.message || 'Failed to download template');
+                  } finally {
+                    setDownloadingTemplate(false);
+                  }
+                }}
+                variant="outline"
+                className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                disabled={downloadingTemplate}
+              >
+                {downloadingTemplate ? 'Downloading...' : '📥 Download Template'}
+              </Button>
+              <Button 
+                onClick={() => setShowImportDialog(true)} 
+                variant="outline"
+                className="border-green-600 text-green-600 hover:bg-green-50"
+              >
+                📤 Upload Excel
+              </Button>
+            </div>
+          )}
+        </div>
         <Card className="p-8 text-center">
           <p className="text-xl text-slate-500">Please select a store to view inventory</p>
+          {canUploadStocks && (
+            <p className="text-sm text-slate-400 mt-2">Or use the Excel upload to load stocks for all stores</p>
+          )}
         </Card>
+        {canUploadStocks && (
+          <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Upload Stocks from Excel</DialogTitle>
+                <DialogDescription>
+                  Upload an Excel file to load stocks for all stores. Make sure to use the template format with Store Code, SKU, Quantity, and Reorder Level columns.
+                </DialogDescription>
+              </DialogHeader>
+              
+              {!importResult ? (
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="excel-file">Select Excel File</Label>
+                    <Input
+                      id="excel-file"
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        
+                        setImporting(true);
+                        try {
+                          const result = await stockAPI.uploadFromExcel(file);
+                          setImportResult(result);
+                          if (result.errors && result.errors.length > 0) {
+                            toast.warning(`Upload completed with ${result.errors.length} errors`);
+                          } else {
+                            toast.success(`Successfully uploaded stocks: ${result.created} created, ${result.updated} updated`);
+                          }
+                        } catch (error) {
+                          toast.error(error.detail || error.message || 'Failed to upload stocks');
+                        } finally {
+                          setImporting(false);
+                        }
+                      }}
+                      disabled={importing}
+                    />
+                    <p className="text-xs text-slate-500">
+                      Supported formats: .xlsx, .xls. Required columns: Store Code, SKU, Quantity
+                    </p>
+                  </div>
+                  
+                  {importing && (
+                    <div className="text-center py-4">
+                      <p className="text-slate-600">Processing file...</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4 py-4">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h4 className="font-semibold text-green-800 mb-2">Upload Summary</h4>
+                    <div className="space-y-1 text-sm">
+                      <p><span className="font-medium">Created:</span> {importResult.created} stock records</p>
+                      <p><span className="font-medium">Updated:</span> {importResult.updated} stock records</p>
+                      <p><span className="font-medium">Total Processed:</span> {importResult.total_processed} records</p>
+                      <p><span className="font-medium">Total Rows:</span> {importResult.total_rows} rows</p>
+                    </div>
+                  </div>
+                  
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-h-60 overflow-y-auto">
+                      <h4 className="font-semibold text-red-800 mb-2">Errors ({importResult.errors.length})</h4>
+                      <ul className="text-sm text-red-700 space-y-1">
+                        {importResult.errors.map((error, idx) => (
+                          <li key={idx} className="text-xs">• {error}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <DialogFooter>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => {
+                    setShowImportDialog(false);
+                    setImportResult(null);
+                    const fileInput = document.getElementById('excel-file');
+                    if (fileInput) fileInput.value = '';
+                  }}
+                >
+                  {importResult ? 'Close' : 'Cancel'}
+                </Button>
+                {importResult && (
+                  <Button 
+                    type="button"
+                    onClick={() => {
+                      setImportResult(null);
+                      const fileInput = document.getElementById('excel-file');
+                      if (fileInput) fileInput.value = '';
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    Upload Another
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
     );
   }
@@ -123,9 +273,40 @@ export function Inventory() {
           <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
           <p className="text-slate-500">{selectedStore.name} - Stock Management</p>
         </div>
-        <Button onClick={() => setShowDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
-          + Stock Movement
-        </Button>
+        <div className="flex gap-2">
+          {canUploadStocks && (
+            <>
+              <Button 
+                onClick={async () => {
+                  setDownloadingTemplate(true);
+                  try {
+                    await stockAPI.downloadTemplate();
+                    toast.success('Template downloaded successfully!');
+                  } catch (error) {
+                    toast.error(error.message || 'Failed to download template');
+                  } finally {
+                    setDownloadingTemplate(false);
+                  }
+                }}
+                variant="outline"
+                className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                disabled={downloadingTemplate}
+              >
+                {downloadingTemplate ? 'Downloading...' : '📥 Download Template'}
+              </Button>
+              <Button 
+                onClick={() => setShowImportDialog(true)} 
+                variant="outline"
+                className="border-green-600 text-green-600 hover:bg-green-50"
+              >
+                📤 Upload Excel
+              </Button>
+            </>
+          )}
+          <Button onClick={() => setShowDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+            + Stock Movement
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -313,6 +494,118 @@ export function Inventory() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Import Excel Dialog - Super Admin and Org Admin Only */}
+      {canUploadStocks && (
+        <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Upload Stocks from Excel</DialogTitle>
+              <DialogDescription>
+                Upload an Excel file to load stocks for all stores. Make sure to use the template format with Store Code, SKU, Quantity, and Reorder Level columns.
+              </DialogDescription>
+            </DialogHeader>
+            
+            {!importResult ? (
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="excel-file">Select Excel File</Label>
+                  <Input
+                    id="excel-file"
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={async (e) => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+                      
+                      setImporting(true);
+                      try {
+                        const result = await stockAPI.uploadFromExcel(file);
+                        setImportResult(result);
+                        if (result.errors && result.errors.length > 0) {
+                          toast.warning(`Upload completed with ${result.errors.length} errors`);
+                        } else {
+                          toast.success(`Successfully uploaded stocks: ${result.created} created, ${result.updated} updated`);
+                        }
+                        // Reload stock for current store if selected
+                        if (selectedStore) {
+                          loadStock();
+                        }
+                      } catch (error) {
+                        toast.error(error.detail || error.message || 'Failed to upload stocks');
+                      } finally {
+                        setImporting(false);
+                      }
+                    }}
+                    disabled={importing}
+                  />
+                  <p className="text-xs text-slate-500">
+                    Supported formats: .xlsx, .xls. Required columns: Store Code, SKU, Quantity
+                  </p>
+                </div>
+                
+                {importing && (
+                  <div className="text-center py-4">
+                    <p className="text-slate-600">Processing file...</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4 py-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-green-800 mb-2">Upload Summary</h4>
+                  <div className="space-y-1 text-sm">
+                    <p><span className="font-medium">Created:</span> {importResult.created} stock records</p>
+                    <p><span className="font-medium">Updated:</span> {importResult.updated} stock records</p>
+                    <p><span className="font-medium">Total Processed:</span> {importResult.total_processed} records</p>
+                    <p><span className="font-medium">Total Rows:</span> {importResult.total_rows} rows</p>
+                  </div>
+                </div>
+                
+                {importResult.errors && importResult.errors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-h-60 overflow-y-auto">
+                    <h4 className="font-semibold text-red-800 mb-2">Errors ({importResult.errors.length})</h4>
+                    <ul className="text-sm text-red-700 space-y-1">
+                      {importResult.errors.map((error, idx) => (
+                        <li key={idx} className="text-xs">• {error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            <DialogFooter>
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => {
+                  setShowImportDialog(false);
+                  setImportResult(null);
+                  // Reset file input
+                  const fileInput = document.getElementById('excel-file');
+                  if (fileInput) fileInput.value = '';
+                }}
+              >
+                {importResult ? 'Close' : 'Cancel'}
+              </Button>
+              {importResult && (
+                <Button 
+                  type="button"
+                  onClick={() => {
+                    setImportResult(null);
+                    const fileInput = document.getElementById('excel-file');
+                    if (fileInput) fileInput.value = '';
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                >
+                  Upload Another
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

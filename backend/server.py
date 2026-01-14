@@ -1672,73 +1672,6 @@ async def get_product_brands(user: Dict = Depends(get_current_user)):
     })
     return sorted([b for b in brands if b])  # Filter out empty strings and None
 
-@api_router.get("/products/{product_id}", response_model=Product)
-async def get_product(product_id: str, user: Dict = Depends(get_current_user)):
-    """Get product by ID"""
-    product = await db.products.find_one({
-        "id": product_id,
-        "organization_id": user["organization_id"]
-    }, {"_id": 0})
-    
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return deserialize_datetime(product)
-
-@api_router.get("/products/barcode/{barcode}", response_model=Product)
-async def get_product_by_barcode(barcode: str, user: Dict = Depends(get_current_user)):
-    """Get product by barcode"""
-    product = await db.products.find_one({
-        "barcode": barcode,
-        "organization_id": user["organization_id"]
-    }, {"_id": 0})
-    
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return deserialize_datetime(product)
-
-@api_router.put("/products/{product_id}", response_model=Product)
-async def update_product(
-    product_id: str,
-    data: ProductCreate,
-    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
-):
-    """Update product"""
-    update_data = data.model_dump(exclude_unset=True)
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    result = await db.products.update_one(
-        {"id": product_id, "organization_id": user["organization_id"]},
-        {"$set": serialize_datetime(update_data)}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
-    # Verify product belongs to user's organization
-    query = {"id": product_id}
-    if user["role"] != UserRole.SUPER_ADMIN:
-        query["organization_id"] = user["organization_id"]
-    product = await db.products.find_one(query, {"_id": 0})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return deserialize_datetime(product)
-
-@api_router.delete("/products/{product_id}")
-async def delete_product(
-    product_id: str,
-    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN]))
-):
-    """Soft delete product"""
-    result = await db.products.update_one(
-        {"id": product_id, "organization_id": user["organization_id"]},
-        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
-    return {"message": "Product deleted"}
-
 @api_router.get("/products/template")
 async def download_product_template(user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))):
     """Download Excel template for product import"""
@@ -1839,6 +1772,73 @@ async def download_product_template(user: Dict = Depends(require_role([UserRole.
     except Exception as e:
         logger.error(f"Error generating template: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate template: {str(e)}")
+
+@api_router.get("/products/{product_id}", response_model=Product)
+async def get_product(product_id: str, user: Dict = Depends(get_current_user)):
+    """Get product by ID"""
+    product = await db.products.find_one({
+        "id": product_id,
+        "organization_id": user["organization_id"]
+    }, {"_id": 0})
+    
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return deserialize_datetime(product)
+
+@api_router.get("/products/barcode/{barcode}", response_model=Product)
+async def get_product_by_barcode(barcode: str, user: Dict = Depends(get_current_user)):
+    """Get product by barcode"""
+    product = await db.products.find_one({
+        "barcode": barcode,
+        "organization_id": user["organization_id"]
+    }, {"_id": 0})
+    
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return deserialize_datetime(product)
+
+@api_router.put("/products/{product_id}", response_model=Product)
+async def update_product(
+    product_id: str,
+    data: ProductCreate,
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.STORE_ADMIN]))
+):
+    """Update product"""
+    update_data = data.model_dump(exclude_unset=True)
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    result = await db.products.update_one(
+        {"id": product_id, "organization_id": user["organization_id"]},
+        {"$set": serialize_datetime(update_data)}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Verify product belongs to user's organization
+    query = {"id": product_id}
+    if user["role"] != UserRole.SUPER_ADMIN:
+        query["organization_id"] = user["organization_id"]
+    product = await db.products.find_one(query, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return deserialize_datetime(product)
+
+@api_router.delete("/products/{product_id}")
+async def delete_product(
+    product_id: str,
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN]))
+):
+    """Soft delete product"""
+    result = await db.products.update_one(
+        {"id": product_id, "organization_id": user["organization_id"]},
+        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    return {"message": "Product deleted"}
 
 @api_router.post("/products/import")
 async def import_products_from_excel(
@@ -2170,6 +2170,100 @@ async def get_pricing_audit(
 
 # ==================== STOCK ROUTES ====================
 
+@api_router.get("/stock/upload-template")
+async def download_stock_upload_template(user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN]))):
+    """Download Excel template for stock upload (Super Admin and Org Admin only)"""
+    logger.info("Generating stock upload template")
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Stock Upload"
+        
+        # Header row with styling
+        headers = [
+            "Store Code*", "SKU*", "Quantity*", "Reorder Level"
+        ]
+        
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Add example rows
+        examples = [
+            ["MAIN001", "SKU001", "100.00", "10.00"],
+            ["MAIN001", "SKU002", "50.00", "5.00"],
+            ["STORE002", "SKU001", "75.00", "10.00"],
+        ]
+        
+        for row_num, example in enumerate(examples, 2):
+            for col_num, value in enumerate(example, 1):
+                ws.cell(row=row_num, column=col_num, value=value)
+        
+        # Set column widths
+        column_widths = [15, 15, 15, 15]
+        for col_num, width in enumerate(column_widths, 1):
+            ws.column_dimensions[ws.cell(row=1, column=col_num).column_letter].width = width
+        
+        # Add instructions sheet
+        ws_instructions = wb.create_sheet("Instructions")
+        instructions = [
+            ["Stock Upload Template - Instructions"],
+            [""],
+            ["Required Fields (marked with *):"],
+            ["- Store Code: The code of the store (e.g., MAIN001) (required)"],
+            ["- SKU: Stock Keeping Unit of the product (required)"],
+            ["- Quantity: Stock quantity to set for the product (required)"],
+            [""],
+            ["Optional Fields:"],
+            ["- Reorder Level: Reorder level for the product (default: 10)"],
+            [""],
+            ["Notes:"],
+            ["- Store Code must match an existing store in your organization"],
+            ["- SKU must match an existing product in your organization"],
+            ["- Quantity must be a non-negative number"],
+            ["- Reorder Level must be a non-negative number"],
+            ["- If stock doesn't exist, it will be created"],
+            ["- If stock exists, it will be updated"],
+            ["- Remove example rows before uploading"],
+            [""],
+            ["Example:"],
+            ["Store Code | SKU    | Quantity | Reorder Level"],
+            ["MAIN001   | SKU001 | 100.00   | 10.00"],
+        ]
+        
+        for row_num, instruction in enumerate(instructions, 1):
+            ws_instructions.cell(row=row_num, column=1, value=instruction[0])
+            if row_num == 1:
+                ws_instructions.cell(row=row_num, column=1).font = Font(bold=True, size=14)
+        
+        # Save to BytesIO
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Get bytes from the buffer
+        excel_bytes = output.getvalue()
+        output.close()
+        
+        logger.info(f"Stock upload template generated successfully, size: {len(excel_bytes)} bytes")
+        
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": "attachment; filename=stock_upload_template.xlsx",
+                "Content-Length": str(len(excel_bytes))
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error generating stock upload template: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate template: {str(e)}")
+
 @api_router.get("/stock/{store_id}", response_model=List[Dict])
 async def get_store_stock(store_id: str, user: Dict = Depends(get_current_user)):
     """Get stock levels for a store"""
@@ -2268,6 +2362,243 @@ async def get_stock_movements(
     
     movements = await db.stock_movements.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [deserialize_datetime(m) for m in movements]
+
+# Store Stock Response Model
+class StoreStockItem(BaseModel):
+    id: str
+    product_id: str
+    product_name: str
+    sku: str
+    barcode: Optional[str] = None
+    quantity: float
+    reorder_level: float
+    selling_price: float
+
+class StoreStockResponse(BaseModel):
+    store_id: str
+    store_name: str
+    store_code: str
+    stocks: List[StoreStockItem]
+
+@api_router.get("/stock/all-stores", response_model=List[StoreStockResponse])
+async def get_all_stores_stock(user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN]))):
+    """Get stock levels for all stores in the organization (Super Admin and Org Admin only)"""
+    if not user.get("organization_id"):
+        raise HTTPException(status_code=400, detail="No organization associated")
+    
+    # Get all stores for the organization
+    stores = await db.stores.find(
+        {"organization_id": user["organization_id"]}, 
+        {"_id": 0}
+    ).to_list(1000)
+    
+    if not stores:
+        return []
+    
+    result = []
+    
+    # For each store, get its stocks
+    for store in stores:
+        # Join stock with products for this store
+        pipeline = [
+            {"$match": {"store_id": store["id"], "organization_id": user["organization_id"]}},
+            {"$lookup": {
+                "from": "products",
+                "localField": "product_id",
+                "foreignField": "id",
+                "as": "product"
+            }},
+            {"$unwind": "$product"},
+            {"$project": {
+                "_id": 0,
+                "id": 1,
+                "product_id": 1,
+                "quantity": 1,
+                "reorder_level": 1,
+                "product_name": "$product.name",
+                "sku": "$product.sku",
+                "barcode": "$product.barcode",
+                "selling_price": "$product.selling_price"
+            }}
+        ]
+        
+        stocks = await db.stock.aggregate(pipeline).to_list(1000)
+        
+        # Convert to StoreStockItem models
+        stock_items = [
+            StoreStockItem(
+                id=stock["id"],
+                product_id=stock["product_id"],
+                product_name=stock["product_name"],
+                sku=stock["sku"],
+                barcode=stock.get("barcode"),
+                quantity=stock["quantity"],
+                reorder_level=stock["reorder_level"],
+                selling_price=stock["selling_price"]
+            )
+            for stock in stocks
+        ]
+        
+        result.append(StoreStockResponse(
+            store_id=store["id"],
+            store_name=store["name"],
+            store_code=store["code"],
+            stocks=stock_items
+        ))
+    
+    return result
+
+@api_router.post("/stock/upload")
+async def upload_stocks_from_excel(
+    file: UploadFile = File(...),
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN]))
+):
+    """Upload stocks for stores from Excel file (Super Admin and Org Admin only)"""
+    if not user.get("organization_id"):
+        raise HTTPException(status_code=400, detail="No organization associated")
+    
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    
+    try:
+        # Read Excel file
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents), sheet_name=0)
+        
+        # Validate required columns
+        required_columns = ['Store Code', 'SKU', 'Quantity']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Missing required columns: {', '.join(missing_columns)}"
+            )
+        
+        # Get all stores for the organization (for validation)
+        stores = await db.stores.find(
+            {"organization_id": user["organization_id"]}, 
+            {"_id": 0, "id": 1, "code": 1, "name": 1}
+        ).to_list(1000)
+        
+        store_code_map = {store["code"]: store for store in stores}
+        
+        # Process stocks
+        created_count = 0
+        updated_count = 0
+        errors = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Get values with validation
+                store_code = str(row['Store Code']).strip() if pd.notna(row['Store Code']) else None
+                sku = str(row['SKU']).strip() if pd.notna(row['SKU']) else None
+                quantity = row['Quantity']
+                reorder_level = float(row['Reorder Level']) if pd.notna(row.get('Reorder Level')) else 10.0
+                
+                # Validate required fields
+                if not store_code:
+                    errors.append(f"Row {index + 2}: Store Code is required")
+                    continue
+                
+                if not sku:
+                    errors.append(f"Row {index + 2}: SKU is required")
+                    continue
+                
+                # Validate store exists
+                if store_code not in store_code_map:
+                    errors.append(f"Row {index + 2}: Store Code '{store_code}' not found in your organization")
+                    continue
+                
+                store = store_code_map[store_code]
+                store_id = store["id"]
+                
+                # Validate quantity
+                try:
+                    quantity = float(quantity)
+                    if quantity < 0:
+                        errors.append(f"Row {index + 2}: Quantity must be non-negative")
+                        continue
+                except (ValueError, TypeError):
+                    errors.append(f"Row {index + 2}: Invalid quantity value")
+                    continue
+                
+                # Validate reorder level
+                if reorder_level < 0:
+                    errors.append(f"Row {index + 2}: Reorder Level must be non-negative")
+                    continue
+                
+                # Find product by SKU
+                product = await db.products.find_one({
+                    "organization_id": user["organization_id"],
+                    "sku": sku
+                }, {"_id": 0})
+                
+                if not product:
+                    errors.append(f"Row {index + 2}: Product with SKU '{sku}' not found")
+                    continue
+                
+                product_id = product["id"]
+                
+                # Check if stock exists
+                existing_stock = await db.stock.find_one({
+                    "store_id": store_id,
+                    "product_id": product_id,
+                    "organization_id": user["organization_id"]
+                })
+                
+                if existing_stock:
+                    # Update existing stock
+                    await db.stock.update_one(
+                        {"id": existing_stock["id"]},
+                        {"$set": {
+                            "quantity": quantity,
+                            "reorder_level": reorder_level,
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }}
+                    )
+                    updated_count += 1
+                else:
+                    # Create new stock
+                    new_stock = Stock(
+                        organization_id=user["organization_id"],
+                        store_id=store_id,
+                        product_id=product_id,
+                        quantity=quantity,
+                        reorder_level=reorder_level
+                    )
+                    await db.stock.insert_one(serialize_datetime(new_stock.model_dump()))
+                    created_count += 1
+                
+                # Create stock movement record for tracking
+                movement = StockMovement(
+                    organization_id=user["organization_id"],
+                    store_id=store_id,
+                    product_id=product_id,
+                    movement_type=StockMovementType.ADJUSTMENT,
+                    quantity=quantity,
+                    reason=f"Bulk upload from Excel - Row {index + 2}",
+                    user_id=user["id"],
+                    balance_after=quantity
+                )
+                await db.stock_movements.insert_one(serialize_datetime(movement.model_dump()))
+                    
+            except Exception as e:
+                errors.append(f"Row {index + 2}: {str(e)}")
+                continue
+        
+        return {
+            "message": "Stock upload completed",
+            "created": created_count,
+            "updated": updated_count,
+            "errors": errors,
+            "total_processed": created_count + updated_count,
+            "total_rows": len(df)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading stocks: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
 
 # ==================== STOCK TRANSFER ROUTES ====================
 
