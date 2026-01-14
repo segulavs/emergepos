@@ -410,8 +410,6 @@ export function POS() {
           }, newReceipt.receipt_number);
           
           // Try to print automatically - try connected printer first, auto-connect RawBT on Android
-          const isAndroid = /Android/i.test(navigator.userAgent);
-          
           if (printerStatus.connected) {
             logPrintInfo('AUTO-PRINT', `Printer is connected, attempting to print via ${printerStatus.type}`, {
               printer_type: printerStatus.type
