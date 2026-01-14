@@ -409,58 +409,8 @@ export function POS() {
             window_location: window.location.href
           }, newReceipt.receipt_number);
           
-          // Try to print automatically - try connected printer first, auto-connect RawBT on Android
-          if (printerStatus.connected) {
-            logPrintInfo('AUTO-PRINT', `Printer is connected, attempting to print via ${printerStatus.type}`, {
-              printer_type: printerStatus.type
-            }, newReceipt.receipt_number);
-            // Use connected printer (RawBT, USB, etc.)
-            try {
-              const printResult = await printReceipt(newReceipt, printSettings, true); // auto-connect RawBT
-              logPrintInfo('AUTO-PRINT', `Print successful via ${printerStatus.type}`, {
-                result: printResult,
-                printer_type: printerStatus.type
-              }, newReceipt.receipt_number);
-            } catch (printError) {
-              logPrintError('AUTO-PRINT', `Print failed via ${printerStatus.type}`, {
-                error: printError.message,
-                stack: printError.stack,
-                name: printError.name,
-                printer_type: printerStatus.type
-              }, newReceipt.receipt_number);
-              // On Android, don't fallback to browser print (avoids stuck preview)
-              if (isAndroid) {
-                logPrintWarn('AUTO-PRINT', 'Print failed on Android - not falling back to browser print', {}, newReceipt.receipt_number);
-                toast.warning('Print failed. Please ensure RawBT printer is connected.');
-              } else {
-                logPrintInfo('AUTO-PRINT', 'Falling back to browser print', {}, newReceipt.receipt_number);
-                openPrintWindow(newReceipt, printSettings, false); // Don't auto-print
-              }
-            }
-          } else {
-            // Try to auto-connect RawBT on Android
-            if (isAndroid) {
-              logPrintInfo('AUTO-PRINT', 'No printer connected, attempting auto-connect to RawBT on Android', {}, newReceipt.receipt_number);
-              try {
-                const printResult = await printReceipt(newReceipt, printSettings, true); // auto-connect RawBT
-                logPrintInfo('AUTO-PRINT', 'Auto-connected and printed successfully', {
-                  result: printResult
-                }, newReceipt.receipt_number);
-              } catch (printError) {
-                logPrintWarn('AUTO-PRINT', 'Auto-connect failed or print failed', {
-                  error: printError.message
-                }, newReceipt.receipt_number);
-                toast.warning('Print failed. Please connect RawBT printer for Android devices.');
-              }
-            } else {
-              logPrintInfo('AUTO-PRINT', 'No printer connected, using browser print', {
-                user_agent: navigator.userAgent,
-                platform: navigator.platform
-              }, newReceipt.receipt_number);
-              // No printer connected, use browser print (non-Android only)
-              openPrintWindow(newReceipt, printSettings, false); // Don't auto-print
-            }
-          }
+          // Use same simple print mechanism as reports
+          printReceiptSimple(newReceipt, printSettings);
         } catch (printError) {
           logPrintError('AUTO-PRINT', 'Fatal error during print process', {
             error: printError.message,
@@ -489,38 +439,8 @@ export function POS() {
       invoiceLogo
     };
     
-    // Try thermal printer first, avoid browser print on Android
-    const printerStatus = getPrinterStatus();
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    
-    if (printerStatus.connected) {
-      try {
-        const result = await printReceipt(lastReceipt, settings, true); // auto-connect RawBT
-        toast.success(`Receipt printed via ${result.method}`);
-      } catch (error) {
-        console.error('Print failed:', error);
-        // On Android, don't fallback to browser print (avoids stuck preview)
-        if (isAndroid) {
-          toast.error('Print failed: ' + error.message + '. Please ensure RawBT printer is connected.');
-        } else {
-          toast.error('RawBT print failed: ' + error.message);
-          openPrintWindow(lastReceipt, settings, false); // Don't auto-print
-          toast.info('Opened receipt for browser printing instead');
-        }
-      }
-    } else {
-      // Try auto-connect on Android
-      if (isAndroid) {
-        try {
-          const result = await printReceipt(lastReceipt, settings, true); // auto-connect RawBT
-          toast.success(`Receipt printed via ${result.method}`);
-        } catch (error) {
-          toast.warning('Print failed. Please connect RawBT printer for Android devices.');
-        }
-      } else {
-        openPrintWindow(lastReceipt, settings, false); // Don't auto-print
-      }
-    }
+    // Use same simple print mechanism as reports
+    printReceiptSimple(lastReceipt, settings);
   };
 
   const handleConnectPrinter = async () => {
@@ -858,6 +778,96 @@ export function POS() {
     } finally {
       setLoadingDailyReport(false);
     }
+  };
+
+  // Print receipt using same mechanism as reports
+  const printReceiptSimple = (receipt, settings = {}) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Please allow popups to print');
+      return;
+    }
+
+    const receiptCurrencySymbol = settings.currencySymbol || currencySymbol || 'K';
+    const formatCurrency = (amount) => `${receiptCurrencySymbol}${(amount || 0).toFixed(2)}`;
+    const total = receipt.total || receipt.items?.reduce((sum, i) => sum + (i.line_total || i.quantity * i.unit_price), 0) || 0;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Receipt ${receipt.receipt_number}</title>
+        <style>
+          @page { margin: 0; size: 80mm auto; }
+          body { 
+            font-family: 'Courier New', monospace; 
+            font-size: 12px; 
+            width: 80mm; 
+            margin: 0 auto; 
+            padding: 5mm;
+          }
+          .center { text-align: center; }
+          .bold { font-weight: bold; }
+          .right { text-align: right; }
+          .separator { border-top: 1px dashed #000; margin: 5px 0; }
+          .header { font-size: 16px; font-weight: bold; }
+          .item { display: flex; justify-content: space-between; }
+          .item-detail { padding-left: 10px; color: #666; }
+          .total { font-size: 14px; font-weight: bold; margin-top: 10px; }
+          .logo { max-height: 50px; max-width: 150px; margin: 0 auto 10px; display: block; }
+          @media print { body { margin: 0; } }
+        </style>
+      </head>
+      <body>
+        ${settings.invoiceLogo ? `<img src="${settings.invoiceLogo}" alt="Logo" class="logo" />` : ''}
+        <div class="center header">${settings.storeName || selectedStore?.name || 'Store'}</div>
+        ${settings.storeAddress ? `<div class="center">${settings.storeAddress}</div>` : ''}
+        <div class="separator"></div>
+        <div>Receipt: ${receipt.receipt_number}</div>
+        <div>Date: ${new Date(receipt.created_at).toLocaleString()}</div>
+        ${receipt.cashier_name ? `<div>Cashier: ${receipt.cashier_name}</div>` : ''}
+        <div class="separator"></div>
+        ${receipt.customer_name ? `
+          <div class="bold">Customer: ${receipt.customer_name}</div>
+          ${receipt.customer_phone ? `<div>Phone: ${receipt.customer_phone}</div>` : ''}
+          <div class="separator"></div>
+        ` : ''}
+        ${(receipt.items || []).map(item => `
+          <div class="item">
+            <div>
+              <div>${item.product_name} ${formatCurrency(item.unit_price)} x${item.quantity} ${formatCurrency(item.line_total || item.quantity * item.unit_price)}</div>
+              <div class="item-detail">Brand: ${item.brand || 'N/A'}</div>
+            </div>
+          </div>
+        `).join('')}
+        <div class="separator"></div>
+        <div class="item total">
+          <span>TOTAL:</span>
+          <span>${formatCurrency(total)}</span>
+        </div>
+        ${receipt.payments?.[0] ? `
+          <div class="item">
+            <span>Paid (${receipt.payments[0].method.toUpperCase()}):</span>
+            <span>${formatCurrency(receipt.payments[0].amount)}</span>
+          </div>
+          ${receipt.payments[0].amount > total ? `
+            <div class="item">
+              <span>Change:</span>
+              <span>${formatCurrency(receipt.payments[0].amount - total)}</span>
+            </div>
+          ` : ''}
+        ` : ''}
+        <div class="separator"></div>
+        <div class="center">Thank you for your purchase!</div>
+        <div class="center" style="font-size: 10px; margin-top: 5px;">Powered by NG POS</div>
+        
+        <script>window.onload = function() { window.print(); }</script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   // Print session report
