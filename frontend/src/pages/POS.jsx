@@ -409,14 +409,16 @@ export function POS() {
             window_location: window.location.href
           }, newReceipt.receipt_number);
           
-          // Try to print automatically - try connected printer first, then fallback to browser print
+          // Try to print automatically - try connected printer first, auto-connect RawBT on Android
+          const isAndroid = /Android/i.test(navigator.userAgent);
+          
           if (printerStatus.connected) {
             logPrintInfo('AUTO-PRINT', `Printer is connected, attempting to print via ${printerStatus.type}`, {
               printer_type: printerStatus.type
             }, newReceipt.receipt_number);
             // Use connected printer (RawBT, USB, etc.)
             try {
-              const printResult = await printReceipt(newReceipt, printSettings);
+              const printResult = await printReceipt(newReceipt, printSettings, true); // auto-connect RawBT
               logPrintInfo('AUTO-PRINT', `Print successful via ${printerStatus.type}`, {
                 result: printResult,
                 printer_type: printerStatus.type
@@ -428,17 +430,38 @@ export function POS() {
                 name: printError.name,
                 printer_type: printerStatus.type
               }, newReceipt.receipt_number);
-              logPrintInfo('AUTO-PRINT', 'Falling back to browser print', {}, newReceipt.receipt_number);
-              // Fallback to browser print
-              openPrintWindow(newReceipt, printSettings);
+              // On Android, don't fallback to browser print (avoids stuck preview)
+              if (isAndroid) {
+                logPrintWarn('AUTO-PRINT', 'Print failed on Android - not falling back to browser print', {}, newReceipt.receipt_number);
+                toast.warning('Print failed. Please ensure RawBT printer is connected.');
+              } else {
+                logPrintInfo('AUTO-PRINT', 'Falling back to browser print', {}, newReceipt.receipt_number);
+                openPrintWindow(newReceipt, printSettings, false); // Don't auto-print
+              }
             }
           } else {
-            logPrintInfo('AUTO-PRINT', 'No printer connected, using browser print', {
-              user_agent: navigator.userAgent,
-              platform: navigator.platform
-            }, newReceipt.receipt_number);
-            // No printer connected, use browser print
-            openPrintWindow(newReceipt, printSettings);
+            // Try to auto-connect RawBT on Android
+            if (isAndroid) {
+              logPrintInfo('AUTO-PRINT', 'No printer connected, attempting auto-connect to RawBT on Android', {}, newReceipt.receipt_number);
+              try {
+                const printResult = await printReceipt(newReceipt, printSettings, true); // auto-connect RawBT
+                logPrintInfo('AUTO-PRINT', 'Auto-connected and printed successfully', {
+                  result: printResult
+                }, newReceipt.receipt_number);
+              } catch (printError) {
+                logPrintWarn('AUTO-PRINT', 'Auto-connect failed or print failed', {
+                  error: printError.message
+                }, newReceipt.receipt_number);
+                toast.warning('Print failed. Please connect RawBT printer for Android devices.');
+              }
+            } else {
+              logPrintInfo('AUTO-PRINT', 'No printer connected, using browser print', {
+                user_agent: navigator.userAgent,
+                platform: navigator.platform
+              }, newReceipt.receipt_number);
+              // No printer connected, use browser print (non-Android only)
+              openPrintWindow(newReceipt, printSettings, false); // Don't auto-print
+            }
           }
         } catch (printError) {
           logPrintError('AUTO-PRINT', 'Fatal error during print process', {
@@ -468,21 +491,37 @@ export function POS() {
       invoiceLogo
     };
     
-    // Try thermal printer first, fall back to browser print
+    // Try thermal printer first, avoid browser print on Android
     const printerStatus = getPrinterStatus();
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    
     if (printerStatus.connected) {
       try {
-        const result = await printReceipt(lastReceipt, settings);
+        const result = await printReceipt(lastReceipt, settings, true); // auto-connect RawBT
         toast.success(`Receipt printed via ${result.method}`);
       } catch (error) {
         console.error('Print failed:', error);
-        toast.error('RawBT print failed: ' + error.message);
-        // Fallback to browser print
-        openPrintWindow(lastReceipt, settings);
-        toast.info('Opened receipt for browser printing instead');
+        // On Android, don't fallback to browser print (avoids stuck preview)
+        if (isAndroid) {
+          toast.error('Print failed: ' + error.message + '. Please ensure RawBT printer is connected.');
+        } else {
+          toast.error('RawBT print failed: ' + error.message);
+          openPrintWindow(lastReceipt, settings, false); // Don't auto-print
+          toast.info('Opened receipt for browser printing instead');
+        }
       }
     } else {
-      openPrintWindow(lastReceipt, settings);
+      // Try auto-connect on Android
+      if (isAndroid) {
+        try {
+          const result = await printReceipt(lastReceipt, settings, true); // auto-connect RawBT
+          toast.success(`Receipt printed via ${result.method}`);
+        } catch (error) {
+          toast.warning('Print failed. Please connect RawBT printer for Android devices.');
+        }
+      } else {
+        openPrintWindow(lastReceipt, settings, false); // Don't auto-print
+      }
     }
   };
 

@@ -143,11 +143,12 @@ export function Transactions() {
       // Refresh and check printer status
       const currentPrinterStatus = getPrinterStatus();
       setPrinterStatus(currentPrinterStatus);
+      const isAndroid = /Android/i.test(navigator.userAgent);
       
       if (currentPrinterStatus.connected && currentPrinterStatus.type === 'rawbt') {
         // Use RawBT printer
         try {
-          const result = await printReceipt(receipt, settings);
+          const result = await printReceipt(receipt, settings, true); // auto-connect RawBT
           if (result.success) {
             toast.success(`Receipt printed via RawBT!`);
           }
@@ -156,26 +157,45 @@ export function Transactions() {
           toast.error('RawBT print failed: ' + printError.message);
           // Update printer status
           setPrinterStatus(getPrinterStatus());
-          // Fallback to browser print
-          openPrintWindow(receipt, settings);
-          toast.info('Opened receipt for browser printing instead');
+          // On Android, don't fallback to browser print (avoids stuck preview)
+          if (!isAndroid) {
+            openPrintWindow(receipt, settings, false); // Don't auto-print
+            toast.info('Opened receipt for browser printing instead');
+          }
         }
       } else if (currentPrinterStatus.connected) {
         // Use USB/Bluetooth printer
         try {
-          const result = await printReceipt(receipt, settings);
+          const result = await printReceipt(receipt, settings, true); // auto-connect RawBT
           if (result.success) {
             toast.success(`Receipt printed via ${result.method}!`);
           }
         } catch (printError) {
-          console.error('Print failed, falling back to browser print:', printError);
-          openPrintWindow(receipt, settings);
-          toast.info('Receipt opened for printing');
+          console.error('Print failed:', printError);
+          // On Android, don't fallback to browser print (avoids stuck preview)
+          if (isAndroid) {
+            toast.error('Print failed: ' + printError.message + '. Please ensure RawBT printer is connected.');
+          } else {
+            openPrintWindow(receipt, settings, false); // Don't auto-print
+            toast.info('Receipt opened for printing');
+          }
         }
       } else {
-        // No printer connected, use browser print
-        openPrintWindow(receipt, settings);
-        toast.info('Receipt opened for printing. Connect RawBT for thermal printing.');
+        // Try auto-connect RawBT on Android
+        if (isAndroid) {
+          try {
+            const result = await printReceipt(receipt, settings, true); // auto-connect RawBT
+            if (result.success) {
+              toast.success(`Receipt printed via ${result.method}!`);
+            }
+          } catch (printError) {
+            toast.warning('Print failed. Please connect RawBT printer for Android devices.');
+          }
+        } else {
+          // No printer connected, use browser print (non-Android only)
+          openPrintWindow(receipt, settings, false); // Don't auto-print
+          toast.info('Receipt opened for printing. Connect RawBT for thermal printing.');
+        }
       }
     } catch (error) {
       console.error('Print error:', error);

@@ -53,6 +53,29 @@ export const checkRawBTAvailable = async () => {
   }
 };
 
+// Auto-connect to RawBT on Android devices
+export const autoConnectRawBT = async () => {
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  if (!isAndroid) {
+    return { success: false, reason: 'not_android' };
+  }
+  
+  // If already connected, return success
+  if (printerType === 'rawbt' && rawbtConnected) {
+    return { success: true, alreadyConnected: true };
+  }
+  
+  try {
+    const result = await connectRawBTPrinter();
+    return { success: true, ...result };
+  } catch (error) {
+    logPrintWarn('AUTO-CONNECT-RAWBT', 'Auto-connect failed', {
+      error: error.message
+    });
+    return { success: false, error: error.message };
+  }
+};
+
 // Connect to RawBT printer (Android)
 export const connectRawBTPrinter = async (customUrl = null) => {
   logPrintInfo('CONNECT-RAWBT', 'Starting RawBT connection', {
@@ -416,13 +439,27 @@ export const formatThermalReceipt = (receipt, settings = {}) => {
 };
 
 // Print receipt based on connection type
-export const printReceipt = async (receipt, settings = {}) => {
+export const printReceipt = async (receipt, settings = {}, autoConnectRawBT = true) => {
   logPrintInfo('PRINT-RECEIPT', 'Starting printReceipt function', {
     printer_type: printerType,
     rawbt_connected: rawbtConnected,
     printer_writer_exists: printerWriter !== null,
-    receipt_number: receipt.receipt_number
+    receipt_number: receipt.receipt_number,
+    auto_connect_rawbt: autoConnectRawBT
   }, receipt.receipt_number, receipt.id);
+  
+  // On Android, try to auto-connect to RawBT if not already connected
+  if (autoConnectRawBT && printerType !== 'rawbt' && /Android/i.test(navigator.userAgent)) {
+    logPrintInfo('PRINT-RECEIPT', 'Attempting auto-connect to RawBT on Android', {}, receipt.receipt_number);
+    const autoConnectResult = await autoConnectRawBT();
+    if (autoConnectResult.success) {
+      logPrintInfo('PRINT-RECEIPT', 'Auto-connected to RawBT successfully', {}, receipt.receipt_number);
+    } else {
+      logPrintDebug('PRINT-RECEIPT', 'Auto-connect to RawBT failed or not available', {
+        reason: autoConnectResult.reason || autoConnectResult.error
+      }, receipt.receipt_number);
+    }
+  }
   
   switch (printerType) {
     case 'usb':
@@ -442,16 +479,26 @@ export const printReceipt = async (receipt, settings = {}) => {
           stack: error.stack,
           name: error.name
         }, receipt.receipt_number);
-        // Fallback to browser print
+        // Don't fallback to browser print on Android (avoids stuck preview)
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        if (isAndroid) {
+          throw error; // Let caller handle the error
+        }
+        // Fallback to browser print only on non-Android
         logPrintInfo('PRINT-RECEIPT', 'Falling back to browser print', {}, receipt.receipt_number);
         printBrowserReceipt(receipt, settings);
         return { success: true, method: 'browser-fallback' };
       }
     
     case 'bluetooth':
-      logPrintWarn('PRINT-RECEIPT', 'Using Bluetooth printer path (not implemented, falling back)', {}, receipt.receipt_number);
+      logPrintWarn('PRINT-RECEIPT', 'Using Bluetooth printer path (not implemented)', {}, receipt.receipt_number);
       // Bluetooth printing would be implemented here
-      // For now, fall back to browser
+      // Don't fallback to browser print on Android
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      if (isAndroid) {
+        throw new Error('Bluetooth printing not implemented. Please use RawBT for Android devices.');
+      }
+      // Fallback to browser print only on non-Android
       printBrowserReceipt(receipt, settings);
       return { success: true, method: 'browser-fallback' };
     
@@ -485,6 +532,14 @@ export const printReceipt = async (receipt, settings = {}) => {
     
     case 'browser':
     default:
+      // On Android, avoid browser print dialog (gets stuck on preview)
+      const isAndroidDevice = /Android/i.test(navigator.userAgent);
+      if (isAndroidDevice) {
+        logPrintWarn('PRINT-RECEIPT', 'Browser print not recommended on Android - skipping to avoid stuck preview', {
+          printer_type: printerType
+        }, receipt.receipt_number);
+        throw new Error('No printer connected. Please connect RawBT printer for Android devices.');
+      }
       logPrintInfo('PRINT-RECEIPT', 'Using browser print path (default)', {
         printer_type: printerType
       }, receipt.receipt_number);
@@ -612,23 +667,28 @@ export const generateReceiptHTML = (receipt, settings = {}) => {
       <div class="separator"></div>
       <div class="center">Thank you for your purchase!</div>
       <div class="center" style="font-size: 10px; margin-top: 5px;">Powered by NG POS</div>
-      
-      <script>window.onload = function() { window.print(); }</script>
     </body>
     </html>
   `;
 };
 
-// Open receipt in new window for printing
-export const openPrintWindow = (receipt, settings = {}) => {
+// Open receipt in new window for printing (without auto-print to avoid stuck preview)
+export const openPrintWindow = (receipt, settings = {}, autoPrint = false) => {
   logPrintInfo('OPEN-PRINT-WINDOW', 'Starting openPrintWindow', {
     receipt_number: receipt.receipt_number,
     user_agent: navigator.userAgent,
-    platform: navigator.platform
+    platform: navigator.platform,
+    auto_print: autoPrint
   }, receipt.receipt_number);
   
   try {
-    const html = generateReceiptHTML(receipt, settings);
+    let html = generateReceiptHTML(receipt, settings);
+    
+    // Only add auto-print script if explicitly requested (for reports, not receipts)
+    if (autoPrint) {
+      html = html.replace('</body>', '<script>window.onload = function() { window.print(); }</script></body>');
+    }
+    
     logPrintDebug('OPEN-PRINT-WINDOW', 'Generated HTML', { html_length: html.length }, receipt.receipt_number);
     
     const printWindow = window.open('', '_blank', 'width=400,height=600');
@@ -644,12 +704,18 @@ export const openPrintWindow = (receipt, settings = {}) => {
     printWindow.document.close();
     logPrintDebug('OPEN-PRINT-WINDOW', 'HTML written to print window', {}, receipt.receipt_number);
     
-    // The print dialog is triggered by window.onload script in the HTML
-    // Close after print dialog
-    printWindow.onafterprint = () => {
-      logPrintInfo('OPEN-PRINT-WINDOW', 'Print dialog closed, closing window', {}, receipt.receipt_number);
-      printWindow.close();
-    };
+    // Only auto-print if requested (for reports)
+    if (autoPrint) {
+      // Close after print dialog
+      printWindow.onafterprint = () => {
+        logPrintInfo('OPEN-PRINT-WINDOW', 'Print dialog closed, closing window', {}, receipt.receipt_number);
+        printWindow.close();
+      };
+    } else {
+      // For receipts, just show the window - user can manually print if needed
+      // This avoids the stuck "Preparing preview..." issue on Android
+      printWindow.focus();
+    }
   } catch (error) {
     logPrintError('OPEN-PRINT-WINDOW', 'Fatal error', {
       error: error.message,
