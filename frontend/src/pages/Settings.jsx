@@ -50,6 +50,7 @@ export function Settings() {
     tax_inclusive_pricing: true,
     tpin: '',
     receipt_footer: '',
+    invoice_prefix: '',
     timezone: 'Africa/Lusaka',
     fiscal_compliance_enabled: true,
     allow_negative_stock: false,
@@ -81,6 +82,7 @@ export function Settings() {
         tax_inclusive_pricing: organization.settings?.tax_inclusive_pricing ?? true,
         tpin: organization.settings?.tpin || '',
         receipt_footer: organization.settings?.receipt_footer || '',
+        invoice_prefix: organization.settings?.invoice_prefix || '',
         timezone: organization.settings?.timezone || 'Africa/Lusaka',
         fiscal_compliance_enabled: organization.settings?.fiscal_compliance_enabled ?? true,
         allow_negative_stock: organization.settings?.allow_negative_stock ?? false,
@@ -105,6 +107,7 @@ export function Settings() {
           tax_inclusive_pricing: formData.tax_inclusive_pricing,
           tpin: formData.tpin,
           receipt_footer: formData.receipt_footer,
+          invoice_prefix: formData.invoice_prefix,
           timezone: formData.timezone,
           fiscal_compliance_enabled: formData.fiscal_compliance_enabled,
           allow_negative_stock: formData.allow_negative_stock,
@@ -603,6 +606,17 @@ export function Settings() {
           <CardDescription>Customize your receipt appearance</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Invoice/Receipt Prefix</Label>
+            <Input
+              value={formData.invoice_prefix}
+              onChange={(e) => setFormData({ ...formData, invoice_prefix: e.target.value })}
+              placeholder="INV"
+              maxLength={12}
+              disabled={!canEdit}
+            />
+            <p className="text-xs text-slate-500">Added before the date in receipt numbers (e.g., INV-20260115-000001).</p>
+          </div>
           <div className="space-y-2">
             <Label>Receipt Footer Message</Label>
             <Textarea

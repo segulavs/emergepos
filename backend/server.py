@@ -19,6 +19,7 @@ import pandas as pd
 import io
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -131,6 +132,7 @@ class OrganizationSettings(BaseModel):
     tax_inclusive_pricing: bool = True
     tpin: Optional[str] = None
     receipt_footer: str = "Thank you for your business!"
+    invoice_prefix: str = ""
     timezone: str = "Africa/Lusaka"
     date_format: str = "DD/MM/YYYY"
     fiscal_compliance_enabled: bool = True
@@ -793,12 +795,26 @@ def deserialize_datetime(obj, fields=['created_at', 'updated_at', 'started_at', 
 async def generate_receipt_number(org_id: str, store_id: str) -> str:
     """Generate sequential receipt number"""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0, "settings": 1})
+    prefix_raw = ""
+    if org:
+        prefix_raw = org.get("settings", {}).get("invoice_prefix") or ""
+    prefix = prefix_raw.strip().replace(" ", "")
+    if prefix:
+        prefix = prefix.rstrip("-")
+        prefix = f"{prefix}-"
+    store = await db.stores.find_one({"id": store_id}, {"_id": 0, "code": 1})
+    store_code = ""
+    if store:
+        store_code = (store.get("code") or "").strip().replace(" ", "")
+    store_segment = f"{store_code}-" if store_code else ""
+    prefix_with_date = f"{prefix}{store_segment}{today}"
     count = await db.transactions.count_documents({
         "organization_id": org_id,
         "store_id": store_id,
-        "receipt_number": {"$regex": f"^{today}"}
+        "receipt_number": {"$regex": f"^{re.escape(prefix_with_date)}"}
     })
-    return f"{today}-{str(count + 1).zfill(6)}"
+    return f"{prefix_with_date}-{str(count + 1).zfill(6)}"
 
 async def generate_transfer_number(org_id: str) -> str:
     """Generate sequential transfer number"""
@@ -955,6 +971,13 @@ async def update_organization(
         raise HTTPException(status_code=403, detail="Cannot update other organizations")
     
     update_data = data.model_dump(exclude_unset=True)
+    if "settings" in update_data and isinstance(update_data.get("settings"), dict):
+        existing = await db.organizations.find_one({"id": org_id}, {"_id": 0, "settings": 1})
+        if existing:
+            update_data["settings"] = {
+                **existing.get("settings", {}),
+                **update_data.get("settings", {})
+            }
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
     result = await db.organizations.update_one(
@@ -4530,6 +4553,13 @@ async def admin_update_organization(
     user: Dict = Depends(require_role([UserRole.SUPER_ADMIN]))
 ):
     """Update any organization (Super Admin only)"""
+    if "settings" in data and isinstance(data.get("settings"), dict):
+        existing = await db.organizations.find_one({"id": org_id}, {"_id": 0, "settings": 1})
+        if existing:
+            data["settings"] = {
+                **existing.get("settings", {}),
+                **data.get("settings", {})
+            }
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
     result = await db.organizations.update_one(
@@ -4810,6 +4840,7 @@ async def seed_default_data():
                 "tax_rate": 16.0,
                 "tax_inclusive_pricing": True,
                 "receipt_footer": "Thank you for your business!",
+                "invoice_prefix": "",
                 "timezone": "Africa/Lusaka",
                 "date_format": "DD/MM/YYYY",
                 "fiscal_compliance_enabled": True,

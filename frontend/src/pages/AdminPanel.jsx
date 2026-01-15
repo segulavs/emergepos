@@ -61,6 +61,7 @@ export function AdminPanel() {
     subscription_plan: 'free',
     max_stores: 1,
     max_users: 5,
+    invoice_prefix: '',
   });
   
   const [userFormData, setUserFormData] = useState({
@@ -115,6 +116,7 @@ export function AdminPanel() {
       subscription_plan: 'free',
       max_stores: 1,
       max_users: 5,
+      invoice_prefix: '',
     });
     setShowOrgDialog(true);
   };
@@ -127,6 +129,7 @@ export function AdminPanel() {
       subscription_plan: org.subscription_plan || 'free',
       max_stores: org.max_stores || 1,
       max_users: org.max_users || 5,
+      invoice_prefix: org.settings?.invoice_prefix || '',
     });
     setShowOrgDialog(true);
   };
@@ -134,11 +137,21 @@ export function AdminPanel() {
   const handleSaveOrg = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        name: orgFormData.name,
+        slug: orgFormData.slug,
+        subscription_plan: orgFormData.subscription_plan,
+        max_stores: orgFormData.max_stores,
+        max_users: orgFormData.max_users,
+        settings: {
+          invoice_prefix: orgFormData.invoice_prefix,
+        },
+      };
       if (editingOrg) {
-        await adminAPI.updateOrganization(editingOrg.id, orgFormData);
+        await adminAPI.updateOrganization(editingOrg.id, payload);
         toast.success('Organization updated!');
       } else {
-        await adminAPI.createOrganization(orgFormData);
+        await adminAPI.createOrganization(payload);
         toast.success('Organization created!');
       }
       setShowOrgDialog(false);
@@ -479,6 +492,15 @@ export function AdminPanel() {
                     required
                   />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Invoice/Receipt Prefix</Label>
+                <Input
+                  value={orgFormData.invoice_prefix}
+                  onChange={(e) => setOrgFormData({ ...orgFormData, invoice_prefix: e.target.value })}
+                  placeholder="INV"
+                  maxLength={12}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Subscription Plan</Label>
