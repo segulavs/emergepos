@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/sync_provider.dart';
-import '../screens/pos_screen.dart';
-import '../screens/products_screen.dart';
-import '../screens/transactions_screen.dart';
-import '../screens/analytics_screen.dart';
-import '../screens/settings_screen.dart';
+import 'pos_screen.dart';
+import 'products_screen.dart';
+import 'transactions_screen.dart';
+import 'analytics_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -151,163 +151,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     syncProvider.isConnected ? Icons.sync : Icons.sync_disabled,
                     color: Colors.white,
                   ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// Placeholder screens for other tabs
-class ProductsScreen extends StatelessWidget {
-  const ProductsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Products'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {
-              // TODO: Add product functionality
-            },
-          ),
-        ],
-      ),
-      body: const Center(
-        child: Text('Products Screen - Coming Soon'),
-      ),
-    );
-  }
-}
-
-class TransactionsScreen extends StatelessWidget {
-  const TransactionsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Transactions'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_list),
-            onPressed: () {
-              // TODO: Filter transactions
-            },
-          ),
-        ],
-      ),
-      body: const Center(
-        child: Text('Transactions Screen - Coming Soon'),
-      ),
-    );
-  }
-}
-
-class AnalyticsScreen extends StatelessWidget {
-  const AnalyticsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Analytics'),
-      ),
-      body: const Center(
-        child: Text('Analytics Screen - Coming Soon'),
-      ),
-    );
-  }
-}
-
-class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: Consumer<AuthProvider>(
-        builder: (context, authProvider, child) {
-          final user = authProvider.user;
-          
-          return ListView(
-            children: [
-              // User Info
-              ListTile(
-                leading: const CircleAvatar(
-                  child: Icon(Icons.person),
-                ),
-                title: Text(user?.fullName ?? 'Unknown User'),
-                subtitle: Text(user?.email ?? ''),
-              ),
-              
-              const Divider(),
-              
-              // Sync Status
-              Consumer<SyncProvider>(
-                builder: (context, syncProvider, child) {
-                  return ListTile(
-                    leading: Icon(
-                      syncProvider.isConnected ? Icons.cloud_done : Icons.cloud_off,
-                      color: syncProvider.isConnected ? Colors.green : Colors.red,
-                    ),
-                    title: const Text('Sync Status'),
-                    subtitle: Text(
-                      syncProvider.isConnected 
-                          ? 'Connected - ${syncProvider.pendingCount} pending'
-                          : 'Offline - ${syncProvider.pendingCount} pending',
-                    ),
-                    trailing: syncProvider.isSyncing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : IconButton(
-                            icon: const Icon(Icons.sync),
-                            onPressed: () => syncProvider.syncNow(),
-                          ),
-                  );
-                },
-              ),
-              
-              const Divider(),
-              
-              // Logout
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Logout'),
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Logout'),
-                      content: const Text('Are you sure you want to logout?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            authProvider.logout();
-                            Navigator.of(context).pushReplacementNamed('/login');
-                          },
-                          child: const Text('Logout'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
           );
         },
       ),

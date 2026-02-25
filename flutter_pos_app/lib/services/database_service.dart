@@ -4,7 +4,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/product.dart';
 import '../models/transaction.dart' as app_models;
-import '../models/user.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
@@ -388,15 +387,15 @@ class DatabaseService {
     );
     
     final items = itemsResult.map((item) => app_models.TransactionItem.fromJson({
-      'productId': item['product_id'],
-      'productName': item['product_name'],
+      'product_id': item['product_id'],
+      'product_name': item['product_name'],
       'sku': item['sku'],
       'quantity': item['quantity'],
-      'unitPrice': item['unit_price'],
-      'discountAmount': item['discount_amount'],
-      'taxType': item['tax_type'],
-      'taxAmount': item['tax_amount'],
-      'lineTotal': item['line_total'],
+      'unit_price': item['unit_price'],
+      'discount_amount': item['discount_amount'],
+      'tax_type': item['tax_type'],
+      'tax_amount': item['tax_amount'],
+      'line_total': item['line_total'],
     })).toList();
 
     // Get payments
@@ -416,7 +415,7 @@ class DatabaseService {
       ...transactionData,
       'items': items.map((e) => e.toJson()).toList(),
       'payments': payments.map((e) => e.toJson()).toList(),
-      'createdAt': transactionData['created_at'],
+      'created_at': transactionData['created_at'],
     });
   }
 

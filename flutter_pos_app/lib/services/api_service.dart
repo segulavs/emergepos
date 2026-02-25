@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -30,7 +29,6 @@ class ApiService {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   
   String? _authToken;
-  bool _dioInitialized = false;
 
   ApiService() {
     _initializeDio();
@@ -56,14 +54,11 @@ class ApiService {
       },
       onError: (error, handler) {
         if (error.response?.statusCode == 401) {
-          // Token expired, clear it
           clearToken();
         }
         handler.next(error);
       },
     ));
-    
-    _dioInitialized = true;
   }
 
   Future<void> _loadCustomBaseUrl() async {

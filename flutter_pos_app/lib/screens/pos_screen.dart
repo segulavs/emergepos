@@ -9,6 +9,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/product_search_delegate.dart';
 import '../widgets/cart_item_widget.dart';
 import '../widgets/payment_dialog.dart';
+import '../widgets/receipt_dialog.dart';
 import '../utils/currency_formatter.dart';
 
 class POSScreen extends StatefulWidget {
@@ -294,7 +295,7 @@ class _POSScreenState extends State<POSScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      product.brand ?? product.sku,
+                      product.brand.isNotEmpty ? product.brand : product.sku,
                       style: TextStyle(
                         color: Colors.grey[600],
                         fontSize: 12,
@@ -729,12 +730,16 @@ class _POSScreenState extends State<POSScreen> {
 
         _clearCart();
         
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Transaction completed: ${transaction.receiptNumber}'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => ReceiptDialog(
+              transaction: transaction,
+              storeName: 'NG POS Store',
+            ),
+          );
+        }
 
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'api_service.dart';
 import 'database_service.dart';
-import '../models/transaction.dart';
 
 class SyncService {
   final ApiService _apiService;
@@ -21,11 +20,11 @@ class SyncService {
 
   void _startConnectivityListener() {
     _connectivitySubscription = _connectivity.onConnectivityChanged.listen((result) {
-      final isConnected = result == ConnectivityResult.mobile || 
-        result == ConnectivityResult.wifi ||
-        result == ConnectivityResult.ethernet;
+      final connected = result == ConnectivityResult.mobile ||
+          result == ConnectivityResult.wifi ||
+          result == ConnectivityResult.ethernet;
       
-      if (isConnected && !_isSyncing) {
+      if (connected && !_isSyncing) {
         syncPendingData();
       }
     });
@@ -41,9 +40,9 @@ class SyncService {
 
   Future<bool> isConnected() async {
     final result = await _connectivity.checkConnectivity();
-    return result == ConnectivityResult.mobile || 
-      result == ConnectivityResult.wifi ||
-      result == ConnectivityResult.ethernet;
+    return result == ConnectivityResult.mobile ||
+        result == ConnectivityResult.wifi ||
+        result == ConnectivityResult.ethernet;
   }
 
   Future<SyncResult> syncPendingData() async {
@@ -62,7 +61,6 @@ class SyncService {
         return SyncResult(success: false, message: 'No internet connection');
       }
 
-      // Check if API is healthy
       if (!await _apiService.checkHealth()) {
         return SyncResult(success: false, message: 'Server is not available');
       }
@@ -70,7 +68,6 @@ class SyncService {
       int syncedCount = 0;
       List<String> errors = [];
 
-      // Sync transactions
       final unsyncedTransactions = await _databaseService!.getUnsyncedTransactions();
       
       for (final transaction in unsyncedTransactions) {
@@ -83,7 +80,6 @@ class SyncService {
         }
       }
 
-      // Sync other pending operations from sync queue
       final syncQueue = await _databaseService!.getSyncQueue();
       
       for (final item in syncQueue) {
@@ -96,7 +92,6 @@ class SyncService {
         }
       }
 
-      // Download latest products if needed
       await _syncProducts();
 
       final message = syncedCount > 0 
@@ -140,16 +135,13 @@ class SyncService {
 
   Future<void> _syncProducts() async {
     try {
-      // Get products from API (this should include stock levels)
       final products = await _apiService.getProducts();
       
-      // Update local database
       if (_databaseService != null) {
         await _databaseService!.insertProducts(products);
       }
     } catch (e) {
-      // Don't throw error for product sync failure
-      print('Failed to sync products: $e');
+      // Product sync failure is non-critical
     }
   }
 

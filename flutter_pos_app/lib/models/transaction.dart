@@ -3,7 +3,7 @@ import 'package:hive/hive.dart';
 
 part 'transaction.g.dart';
 
-@JsonSerializable()
+@JsonSerializable(fieldRename: FieldRename.snake)
 @HiveType(typeId: 2)
 class Transaction extends HiveObject {
   @HiveField(0)
@@ -98,7 +98,7 @@ class Transaction extends HiveObject {
   bool get needsSync => !synced;
 }
 
-@JsonSerializable()
+@JsonSerializable(fieldRename: FieldRename.snake)
 @HiveType(typeId: 3)
 class TransactionItem extends HiveObject {
   @HiveField(0)
@@ -144,7 +144,7 @@ class TransactionItem extends HiveObject {
   Map<String, dynamic> toJson() => _$TransactionItemToJson(this);
 }
 
-@JsonSerializable()
+@JsonSerializable(fieldRename: FieldRename.snake)
 @HiveType(typeId: 4)
 class Payment extends HiveObject {
   @HiveField(0)

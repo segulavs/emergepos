@@ -67,23 +67,23 @@ class UserAdapter extends TypeAdapter<User> {
 
 User _$UserFromJson(Map<String, dynamic> json) => User(
       id: json['id'] as String,
-      organizationId: json['organizationId'] as String?,
+      organizationId: json['organization_id'] as String?,
       storeIds:
-          (json['storeIds'] as List<dynamic>).map((e) => e as String).toList(),
+          (json['store_ids'] as List<dynamic>).map((e) => e as String).toList(),
       email: json['email'] as String,
-      firstName: json['firstName'] as String,
-      lastName: json['lastName'] as String,
+      firstName: json['first_name'] as String,
+      lastName: json['last_name'] as String,
       role: json['role'] as String,
-      isActive: json['isActive'] as bool,
+      isActive: json['is_active'] as bool,
     );
 
 Map<String, dynamic> _$UserToJson(User instance) => <String, dynamic>{
       'id': instance.id,
-      'organizationId': instance.organizationId,
-      'storeIds': instance.storeIds,
+      'organization_id': instance.organizationId,
+      'store_ids': instance.storeIds,
       'email': instance.email,
-      'firstName': instance.firstName,
-      'lastName': instance.lastName,
+      'first_name': instance.firstName,
+      'last_name': instance.lastName,
       'role': instance.role,
-      'isActive': instance.isActive,
+      'is_active': instance.isActive,
     };
