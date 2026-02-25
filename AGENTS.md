@@ -8,7 +8,13 @@ This is a POS & Inventory Management System with three main components:
 - **Frontend**: React 19 (CRA + CRACO) in `frontend/`, runs on port 3000
 - **Database**: MongoDB 7.0, runs on port 27017
 
-The Flutter mobile app (`flutter_pos_app/`) is a separate client; it is not required for web development or testing.
+The Flutter mobile app (`flutter_pos_app/`) is a separate client that connects to the same backend API.
+
+### Flutter app specifics
+- **Build/analyze**: `flutter analyze` (requires Flutter SDK 3.10+). Web: `flutter build web`. Android: `flutter build apk`.
+- **JSON serialization uses `fieldRename: FieldRename.snake`**: The backend returns snake_case JSON. The models use `@JsonSerializable(fieldRename: FieldRename.snake)` and `.g.dart` files are pre-generated (no need to run `build_runner`).
+- **Receipt printing**: Uses `esc_pos_utils` / `esc_pos_printer` for ESC/POS thermal printer support. Printer IP is configured in the Settings screen.
+- **CORS for Flutter web testing**: When testing the Flutter web build against the backend, add `http://localhost:8080` (or whichever port the web build is served on) to the backend's `CORS_ORIGINS` env var.
 
 ### Running services
 
