@@ -1,4 +1,7 @@
+import 'dart:math' show min;
+
 import 'package:flutter/material.dart';
+
 import '../models/transaction.dart';
 import '../utils/currency_formatter.dart';
 
@@ -30,217 +33,248 @@ class _PaymentDialogState extends State<PaymentDialog> {
     _amountController.text = widget.totalAmount.toStringAsFixed(2);
   }
 
+  void _showMessage(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger != null) {
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Payment'),
-      content: SizedBox(
-        width: 400,
+    final size = MediaQuery.sizeOf(context);
+    final maxW = min(420.0, size.width - 24);
+    final maxH = size.height * 0.88;
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      child: SizedBox(
+        width: maxW,
+        height: maxH,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Total amount
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total Amount:'),
-                  Text(
-                    CurrencyFormatter.format(widget.totalAmount),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
+                  const Expanded(
+                    child: Text(
+                      'Payment',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
                     ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
             ),
-            
-            const SizedBox(height: 16),
-            
-            // Payment method selection
-            DropdownButtonFormField<String>(
-              value: _selectedMethod,
-              decoration: const InputDecoration(
-                labelText: 'Payment Method',
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(value: 'cash', child: Text('Cash')),
-                DropdownMenuItem(value: 'card', child: Text('Card')),
-                DropdownMenuItem(value: 'mobile_money', child: Text('Mobile Money')),
-              ],
-              onChanged: (value) {
-                setState(() {
-                  _selectedMethod = value!;
-                  _referenceController.clear();
-                });
-              },
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // Amount input
-            TextField(
-              controller: _amountController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Amount',
-                prefixText: 'K ',
-                border: const OutlineInputBorder(),
-                helperText: _remainingAmount > 0 
-                    ? 'Remaining: ${CurrencyFormatter.format(_remainingAmount)}'
-                    : null,
-              ),
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // Reference (for card/mobile money)
-            if (_selectedMethod != 'cash')
-              TextField(
-                controller: _referenceController,
-                decoration: InputDecoration(
-                  labelText: _selectedMethod == 'card' 
-                      ? 'Card Reference' 
-                      : 'Mobile Money Reference',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            
-            const SizedBox(height: 16),
-            
-            // Add payment button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _addPayment,
-                child: const Text('Add Payment'),
-              ),
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // Payments list
-            if (_payments.isNotEmpty) ...[
-              const Text(
-                'Payments:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ..._payments.asMap().entries.map((entry) {
-                final index = entry.key;
-                final payment = entry.value;
-                return Card(
-                  child: ListTile(
-                    title: Text(_getPaymentMethodName(payment.method)),
-                    subtitle: payment.reference != null 
-                        ? Text('Ref: ${payment.reference}')
-                        : null,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          CurrencyFormatter.format(payment.amount),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, size: 18),
-                          onPressed: () => _removePayment(index),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-              
-              const SizedBox(height: 8),
-              
-              // Payment summary
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _isFullyPaid ? Colors.green[50] : Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Total Paid:'),
-                        Text(
-                          CurrencyFormatter.format(_totalPaid),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Total Amount:'),
+                          Text(
+                            CurrencyFormatter.format(widget.totalAmount),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: _selectedMethod,
+                      decoration: const InputDecoration(
+                        labelText: 'Payment Method',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                        DropdownMenuItem(value: 'card', child: Text('Card')),
+                        DropdownMenuItem(
+                          value: 'mobile_money',
+                          child: Text('Mobile Money'),
                         ),
                       ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedMethod = value!;
+                          _referenceController.clear();
+                        });
+                      },
                     ),
-                    if (!_isFullyPaid)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Remaining:'),
-                          Text(
-                            CurrencyFormatter.format(_remainingAmount),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red,
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _amountController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: 'Amount',
+                        prefixText: 'K ',
+                        border: const OutlineInputBorder(),
+                        helperText: _remainingAmount > 0
+                            ? 'Remaining: ${CurrencyFormatter.format(_remainingAmount)}'
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_selectedMethod != 'cash')
+                      TextField(
+                        controller: _referenceController,
+                        decoration: InputDecoration(
+                          labelText: _selectedMethod == 'card'
+                              ? 'Card Reference'
+                              : 'Mobile Money Reference',
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                    if (_selectedMethod != 'cash') const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _addPayment,
+                        child: const Text('Add Payment'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_payments.isNotEmpty) ...[
+                      const Text(
+                        'Payments:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      ..._payments.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final payment = entry.value;
+                        return Card(
+                          child: ListTile(
+                            title: Text(_getPaymentMethodName(payment.method)),
+                            subtitle: payment.reference != null
+                                ? Text('Ref: ${payment.reference}')
+                                : null,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  CurrencyFormatter.format(payment.amount),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, size: 18),
+                                  onPressed: () => _removePayment(index),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    if (_totalPaid > widget.totalAmount)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Change:'),
-                          Text(
-                            CurrencyFormatter.format(_totalPaid - widget.totalAmount),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
+                        );
+                      }),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _isFullyPaid ? Colors.green[50] : Colors.orange[50],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Total Paid:'),
+                                Text(
+                                  CurrencyFormatter.format(_totalPaid),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
+                            if (!_isFullyPaid)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Remaining:'),
+                                  Text(
+                                    CurrencyFormatter.format(_remainingAmount),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            if (_totalPaid > widget.totalAmount)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Change:'),
+                                  Text(
+                                    CurrencyFormatter.format(
+                                      _totalPaid - widget.totalAmount,
+                                    ),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
                       ),
+                    ],
                   ],
                 ),
               ),
-            ],
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _isFullyPaid ? _completePayment : null,
+                    child: const Text('Complete Payment'),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: _isFullyPaid ? _completePayment : null,
-          child: const Text('Complete Payment'),
-        ),
-      ],
     );
   }
 
   void _addPayment() {
     final amount = double.tryParse(_amountController.text);
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid amount')),
-      );
+      _showMessage('Please enter a valid amount');
       return;
     }
 
     if (_selectedMethod != 'cash' && _referenceController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a reference')),
-      );
+      _showMessage('Please enter a reference');
       return;
     }
 
@@ -250,9 +284,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
         amount: amount,
         reference: _selectedMethod == 'cash' ? null : _referenceController.text.trim(),
       ));
-      
-      // Reset form
-      _amountController.text = _remainingAmount > 0 
+
+      _amountController.text = _remainingAmount > 0
           ? _remainingAmount.toStringAsFixed(2)
           : '0.00';
       _referenceController.clear();
@@ -262,7 +295,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
   void _removePayment(int index) {
     setState(() {
       _payments.removeAt(index);
-      _amountController.text = _remainingAmount > 0 
+      _amountController.text = _remainingAmount > 0
           ? _remainingAmount.toStringAsFixed(2)
           : '0.00';
     });

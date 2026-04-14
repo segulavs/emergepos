@@ -10,6 +10,7 @@ import 'providers/auth_provider.dart';
 import 'providers/products_provider.dart';
 import 'providers/transactions_provider.dart';
 import 'providers/sync_provider.dart';
+import 'providers/store_selection_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
@@ -73,6 +74,9 @@ class POSApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<SyncProvider>(
           create: (context) => SyncProvider(context.read<SyncService>()),
+        ),
+        ChangeNotifierProvider<StoreSelectionProvider>(
+          create: (context) => StoreSelectionProvider(context.read<ApiService>()),
         ),
       ],
       child: Consumer<AuthProvider>(

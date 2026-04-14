@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'api_service.dart';
 import 'database_service.dart';
-import '../models/transaction.dart';
 
 class SyncService {
   final ApiService _apiService;
@@ -98,6 +98,7 @@ class SyncService {
 
       // Download latest products if needed
       await _syncProducts();
+      await _refreshReferenceData();
 
       final message = syncedCount > 0 
           ? 'Synced $syncedCount items successfully'
@@ -149,8 +150,32 @@ class SyncService {
       }
     } catch (e) {
       // Don't throw error for product sync failure
-      print('Failed to sync products: $e');
+      if (kDebugMode) {
+        print('Failed to sync products: $e');
+      }
     }
+  }
+
+  Future<void> _refreshReferenceData() async {
+    try {
+      await _apiService.getStores();
+    } catch (_) {}
+
+    try {
+      await _apiService.getUsers();
+    } catch (_) {}
+
+    try {
+      await _apiService.getWarehouses();
+    } catch (_) {}
+
+    try {
+      await _apiService.getTransfers();
+    } catch (_) {}
+
+    try {
+      await _apiService.getDashboardData();
+    } catch (_) {}
   }
 
   Future<void> queueForSync({
@@ -186,6 +211,10 @@ class SyncService {
       isConnected: await isConnected(),
       isSyncing: _isSyncing,
     );
+  }
+
+  Future<DateTime?> getLastCacheSyncAt() async {
+    return _apiService.getLastCacheSyncAt();
   }
 
   void dispose() {

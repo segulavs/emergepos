@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../services/api_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,8 +14,81 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _serverUrlController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _showServerConfig = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadServerUrl();
+  }
+
+  Future<void> _loadServerUrl() async {
+    try {
+      final apiService = ApiService();
+      final savedUrl = await apiService.getSavedBaseUrl();
+      final currentUrl = apiService.getCurrentBaseUrl();
+      _serverUrlController.text = savedUrl ?? currentUrl;
+    } catch (e) {
+      // Ignore errors, use default
+      _serverUrlController.text = ApiService.defaultBaseUrl;
+    }
+  }
+
+  Future<void> _saveServerUrl() async {
+    String url = _serverUrlController.text.trim();
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a server URL'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Add /api if not present
+      if (!url.contains('/api')) {
+        if (url.endsWith('/')) {
+          url = '${url}api';
+        } else {
+          url = '$url/api';
+        }
+      }
+      // Remove trailing slash
+      if (url.endsWith('/')) {
+        url = url.substring(0, url.length - 1);
+      }
+
+      final apiService = ApiService();
+      await apiService.setBaseUrl(url);
+      
+      if (mounted) {
+        setState(() {
+          _showServerConfig = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Server URL saved successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save server URL: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -126,6 +200,80 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextStyle(fontSize: 16),
                             ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // Server Configuration Button
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _showServerConfig = !_showServerConfig;
+                        });
+                      },
+                      icon: Icon(_showServerConfig ? Icons.arrow_drop_up : Icons.arrow_drop_down),
+                      label: const Text('Server Configuration'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.grey,
+                      ),
+                    ),
+
+                    // Server URL Configuration
+                    if (_showServerConfig)
+                      Card(
+                        color: Colors.blue.shade50,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Server URL',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _serverUrlController,
+                                decoration: const InputDecoration(
+                                  hintText: 'https://your-server.com/api',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.all(12),
+                                ),
+                                keyboardType: TextInputType.url,
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Default: https://disciplined-recreation-production.up.railway.app/api',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  TextButton(
+                                    onPressed: () {
+                                      _serverUrlController.text = ApiService.defaultBaseUrl;
+                                    },
+                                    child: const Text('Use Default'),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton(
+                                    onPressed: _saveServerUrl,
+                                    child: const Text('Save'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                     const SizedBox(height: 24),
 
                     // Demo Credentials
@@ -232,12 +380,29 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/home');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       if (mounted) {
+        // Print detailed error for debugging
+        debugPrint('Login error: $e');
+        debugPrint('Stack trace: $stackTrace');
+        
+        // Show user-friendly error message
+        String errorMessage = 'Login failed';
+        if (e.toString().contains('connection') || e.toString().contains('timeout')) {
+          errorMessage = 'Cannot connect to server. Please check your internet connection.';
+        } else if (e.toString().contains('401') || e.toString().contains('Invalid credentials')) {
+          errorMessage = 'Invalid email or password';
+        } else if (e.toString().contains('parse') || e.toString().contains('No user data')) {
+          errorMessage = 'Invalid response from server. Please check server configuration.';
+        } else {
+          errorMessage = e.toString().replaceAll('Exception: ', '');
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString()),
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -254,6 +419,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _serverUrlController.dispose();
     super.dispose();
   }
 }

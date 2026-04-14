@@ -65,6 +65,9 @@ class Transaction extends HiveObject {
   
   @HiveField(19)
   final bool synced;
+  
+  @HiveField(20)
+  final String? voidedReason;
 
   Transaction({
     required this.id,
@@ -87,6 +90,7 @@ class Transaction extends HiveObject {
     required this.createdAt,
     this.localId,
     required this.synced,
+    this.voidedReason,
   });
 
   factory Transaction.fromJson(Map<String, dynamic> json) => _$TransactionFromJson(json);
@@ -127,6 +131,9 @@ class TransactionItem extends HiveObject {
   
   @HiveField(8)
   final double lineTotal;
+  
+  @HiveField(9)
+  final String? brand;
 
   TransactionItem({
     required this.productId,
@@ -138,6 +145,7 @@ class TransactionItem extends HiveObject {
     required this.taxType,
     required this.taxAmount,
     required this.lineTotal,
+    this.brand,
   });
 
   factory TransactionItem.fromJson(Map<String, dynamic> json) => _$TransactionItemFromJson(json);

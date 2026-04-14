@@ -1,0 +1,7 @@
+{
+  "name": "emergepos-ionic",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react"
+}

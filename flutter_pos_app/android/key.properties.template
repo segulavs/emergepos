@@ -1,0 +1,19 @@
+# Android Keystore Properties
+# Copy this file to key.properties and fill in your actual values
+# DO NOT commit key.properties to version control (it should be in .gitignore)
+
+storePassword=YOUR_KEYSTORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=upload
+storeFile=../upload-keystore.jks
+
+# Instructions:
+# 1. Generate a keystore:
+#    keytool -genkey -v -keystore android/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# 2. Copy this template to key.properties:
+#    cp android/key.properties.template android/key.properties
+#
+# 3. Edit key.properties and fill in your passwords and keystore path
+#
+# 4. Make sure android/key.properties is in .gitignore

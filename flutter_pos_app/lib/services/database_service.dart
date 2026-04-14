@@ -4,7 +4,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/product.dart';
 import '../models/transaction.dart' as app_models;
-import '../models/user.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
@@ -181,7 +180,7 @@ class DatabaseService {
       orderBy: 'name ASC',
     );
 
-    return result.map((json) => Product.fromJson(_convertFromDb(json))).toList();
+    return result.map((json) => Product.fromJson(_mapProductFromDb(json))).toList();
   }
 
   Future<Product?> getProductByBarcode(String barcode) async {
@@ -194,7 +193,7 @@ class DatabaseService {
     );
 
     if (result.isNotEmpty) {
-      return Product.fromJson(_convertFromDb(result.first));
+      return Product.fromJson(_mapProductFromDb(result.first));
     }
     return null;
   }
@@ -203,7 +202,7 @@ class DatabaseService {
     final db = await database;
     await db.insert(
       'products',
-      _convertToDb(product.toJson()),
+      _mapProductToDb(product.toJson()),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
@@ -215,7 +214,7 @@ class DatabaseService {
     for (final product in products) {
       batch.insert(
         'products',
-        _convertToDb(product.toJson()),
+        _mapProductToDb(product.toJson()),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
@@ -231,6 +230,56 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [productId],
     );
+  }
+
+  Map<String, dynamic> _mapProductToDb(Map<String, dynamic> json) {
+    return {
+      'id': json['id'],
+      'organization_id': json['organizationId'],
+      'name': json['name'],
+      'description': json['description'],
+      'sku': json['sku'],
+      'barcode': json['barcode'],
+      'brand': json['brand'],
+      'category': json['category'],
+      'cost_price': json['costPrice'],
+      'selling_price': json['sellingPrice'],
+      'tax_type': json['taxType'],
+      'unit': json['unit'],
+      'is_active': (json['isActive'] as bool? ?? true) ? 1 : 0,
+      'image_base64': json['imageBase64'],
+      'stock_quantity': json['stockQuantity'],
+      'reorder_level': json['reorderLevel'],
+      'created_at': json['createdAt'],
+      'updated_at': json['updatedAt'],
+      'last_synced': DateTime.now().toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> _mapProductFromDb(Map<String, dynamic> dbData) {
+    double numToDouble(dynamic value, {double defaultValue = 0}) {
+      if (value is num) return value.toDouble();
+      return defaultValue;
+    }
+
+    return {
+      'id': dbData['id'],
+      'organizationId': dbData['organization_id'] ?? '',
+      'name': dbData['name'] ?? '',
+      'description': dbData['description'] ?? '',
+      'sku': dbData['sku'] ?? '',
+      'barcode': dbData['barcode'],
+      'brand': dbData['brand'] ?? '',
+      'category': dbData['category'] ?? 'General',
+      'costPrice': numToDouble(dbData['cost_price']),
+      'sellingPrice': numToDouble(dbData['selling_price']),
+      'taxType': dbData['tax_type'] ?? 'exempt',
+      'unit': dbData['unit'] ?? 'piece',
+      'isActive': dbData['is_active'] == 1,
+      'imageBase64': dbData['image_base64'],
+      'stockQuantity': numToDouble(dbData['stock_quantity']),
+      'reorderLevel': numToDouble(dbData['reorder_level'], defaultValue: 10),
+    };
   }
 
   // Transaction operations
@@ -429,21 +478,6 @@ class DatabaseService {
         result[key] = value ? 1 : 0;
       } else if (value is List) {
         result[key] = value.join(',');
-      }
-    });
-    
-    return result;
-  }
-
-  Map<String, dynamic> _convertFromDb(Map<String, dynamic> dbData) {
-    final result = Map<String, dynamic>.from(dbData);
-    
-    // Convert int back to boolean
-    result.forEach((key, value) {
-      if (key.contains('is_') || key == 'synced') {
-        result[key] = value == 1;
-      } else if (key.contains('_ids') && value is String) {
-        result[key] = value.split(',').where((s) => s.isNotEmpty).toList();
       }
     });
     

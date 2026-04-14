@@ -6,10 +6,14 @@ import '../models/transaction.dart';
 import '../providers/products_provider.dart';
 import '../providers/transactions_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/store_selection_provider.dart';
 import '../widgets/product_search_delegate.dart';
+import 'settings_screen.dart';
 import '../widgets/cart_item_widget.dart';
 import '../widgets/payment_dialog.dart';
 import '../utils/currency_formatter.dart';
+import '../services/receipt_printer_service.dart';
+import '../widgets/offline_cached_notice.dart';
 
 class POSScreen extends StatefulWidget {
   const POSScreen({super.key});
@@ -38,11 +42,27 @@ class _POSScreenState extends State<POSScreen> {
   @override
   Widget build(BuildContext context) {
     final isTablet = MediaQuery.of(context).size.width >= 600;
+    final storeProvider = context.watch<StoreSelectionProvider>();
+    final hasSelectedStore = storeProvider.selectedStore != null;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Point of Sale'),
         actions: [
+          if (hasSelectedStore)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Center(
+                child: Chip(
+                  avatar: const Icon(Icons.store, size: 18),
+                  label: Text(
+                    storeProvider.selectedStoreName ?? '',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  backgroundColor: Colors.green.shade100,
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.qr_code_scanner),
             onPressed: _showBarcodeScanner,
@@ -53,7 +73,43 @@ class _POSScreenState extends State<POSScreen> {
           ),
         ],
       ),
-      body: Row(
+      body: Column(
+        children: [
+          const OfflineCachedNotice(),
+          Expanded(
+            child: !hasSelectedStore
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.store_outlined, size: 64, color: Colors.orange),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No Store Selected',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Please select a store in Settings to use POS',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.settings),
+                    label: const Text('Go to Settings'),
+                  ),
+                ],
+              ),
+            )
+          : Row(
         children: [
           // Products Panel
           Expanded(
@@ -65,6 +121,9 @@ class _POSScreenState extends State<POSScreen> {
           Expanded(
             flex: isTablet ? 2 : 1,
             child: _buildCartPanel(isTablet),
+          ),
+        ],
+      ),
           ),
         ],
       ),
@@ -693,6 +752,8 @@ class _POSScreenState extends State<POSScreen> {
 
     final payments = await showDialog<List<Payment>>(
       context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
       builder: (context) => PaymentDialog(totalAmount: total),
     );
 
@@ -703,9 +764,26 @@ class _POSScreenState extends State<POSScreen> {
 
       try {
         final user = context.read<AuthProvider>().user!;
+        final storeProvider = context.read<StoreSelectionProvider>();
+        
+        // Get selected store or fallback to first store in user's store list
+        final storeId = storeProvider.selectedStoreId ?? 
+                        (user.storeIds.isNotEmpty ? user.storeIds.first : null);
+        
+        if (storeId == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please select a store in Settings'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
         
         final transaction = await context.read<TransactionsProvider>().createTransaction(
-          storeId: user.storeIds.first,
+          storeId: storeId,
           items: _cartItems.map((item) => TransactionItem(
             productId: item.product.id,
             productName: item.product.name,
@@ -728,13 +806,31 @@ class _POSScreenState extends State<POSScreen> {
         );
 
         _clearCart();
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Transaction completed: ${transaction.receiptNumber}'),
-            backgroundColor: Colors.green,
-          ),
-        );
+
+        try {
+          await ReceiptPrinterService().printReceiptIfConfigured(
+            transaction,
+            storeName: storeProvider.selectedStoreName,
+          );
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Receipt print failed: $e'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Transaction completed: ${transaction.receiptNumber}'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
 
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(

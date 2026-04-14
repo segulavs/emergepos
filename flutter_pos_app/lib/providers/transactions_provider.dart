@@ -108,6 +108,16 @@ class TransactionsProvider extends ChangeNotifier {
       try {
         final apiTransactions = await _apiService.getTransactions(storeId: storeId);
         _transactions = apiTransactions;
+        if (_databaseService != null) {
+          for (final transaction in apiTransactions) {
+            await _databaseService!.insertTransaction(
+              transaction.copyWith(
+                synced: true,
+                localId: transaction.localId ?? transaction.id,
+              ),
+            );
+          }
+        }
         notifyListeners();
       } catch (e) {
         // API failed, but we have local data

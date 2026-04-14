@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,8 +7,17 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Load keystore properties if they exist
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { 
+        keystoreProperties.load(it) 
+    }
+}
+
 android {
-    namespace = "com.example.flutter_pos_app"
+    namespace = "com.emergepos.mobile"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,11 +27,11 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17"
     }
 
     defaultConfig {
-        applicationId = "com.example.flutter_pos_app"
+        applicationId = "com.emergepos.mobile"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -30,17 +41,32 @@ android {
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        // Create signing config for release builds
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"].toString()
+                keyPassword = keystoreProperties["keyPassword"].toString()
+                storeFile = file(keystoreProperties["storeFile"].toString())
+                storePassword = keystoreProperties["storePassword"].toString()
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Signing with debug keys for now - replace with your own keystore for production
-            // See: https://flutter.dev/docs/deployment/android#signing-the-app
-            signingConfig = signingConfigs.getByName("debug")
+            // Use release signing config if keystore exists, otherwise use debug (for testing)
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
             
-            // Enable code shrinking and obfuscation
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // Enable code shrinking and obfuscation for smaller APK size
+            isMinifyEnabled = true
+            isShrinkResources = true
             
-            // ProGuard rules (if minifyEnabled is true)
+            // ProGuard rules for code shrinking
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -51,7 +77,7 @@ android {
     // Enable split APKs by ABI to reduce APK size
     splits {
         abi {
-            isEnable = false // Set to true to generate split APKs
+            isEnable = false // Set to true to generate split APKs per architecture
             reset()
             // include("armeabi-v7a", "arm64-v8a", "x86_64")
         }

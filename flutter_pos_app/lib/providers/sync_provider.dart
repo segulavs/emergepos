@@ -11,6 +11,7 @@ class SyncProvider extends ChangeNotifier {
     isConnected: false,
     isSyncing: false,
   );
+  DateTime? _lastCacheSyncAt;
   
   Timer? _statusTimer;
 
@@ -23,6 +24,7 @@ class SyncProvider extends ChangeNotifier {
   bool get isSyncing => _status.isSyncing;
   bool get hasPendingData => _status.hasPendingData;
   int get pendingCount => _status.totalPending;
+  DateTime? get lastCacheSyncAt => _lastCacheSyncAt;
 
   void _startStatusUpdates() {
     _updateStatus();
@@ -34,6 +36,7 @@ class SyncProvider extends ChangeNotifier {
   Future<void> _updateStatus() async {
     try {
       _status = await _syncService.getSyncStatus();
+      _lastCacheSyncAt = await _syncService.getLastCacheSyncAt();
       notifyListeners();
     } catch (e) {
       // Handle error silently

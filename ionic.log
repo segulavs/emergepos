@@ -1,0 +1,13 @@
+
+> emergepos-ionic@1.0.0 dev
+> vite
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+Re-optimizing dependencies because lockfile has changed
+Port 5173 is in use, trying another one...
+
+  VITE v5.4.21  ready in 330 ms
+
+  ➜  Local:   http://localhost:5174/
+  ➜  Network: http://192.168.1.128:5174/
+  ➜  Network: http://172.16.0.3:5174/

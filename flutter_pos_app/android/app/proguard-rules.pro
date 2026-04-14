@@ -84,3 +84,8 @@
 -dontwarn kotlinx.**
 -dontwarn androidx.**
 
+# Google Play Core - Missing classes are optional for non-Play Store builds
+-dontwarn com.google.android.play.core.splitcompat.SplitCompatApplication
+-dontwarn com.google.android.play.core.splitinstall.**
+-dontwarn com.google.android.play.core.tasks.**
+-keep class com.google.android.play.core.** { *; }

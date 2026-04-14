@@ -7,8 +7,35 @@ class AuthService {
   AuthService(this._apiService);
 
   Future<User> login(String email, String password) async {
-    final response = await _apiService.login(email, password);
-    return User.fromJson(response['user']);
+    try {
+      final response = await _apiService.login(email, password);
+      
+      if (response['user'] == null) {
+        throw Exception('No user data in login response');
+      }
+      
+      // Convert snake_case from backend to camelCase for Flutter model
+      final userData = Map<String, dynamic>.from(response['user']);
+      final convertedUserData = <String, dynamic>{
+        'id': userData['id'],
+        'organizationId': userData['organization_id'],
+        'storeIds': userData['store_ids'] ?? [],
+        'email': userData['email'],
+        'firstName': userData['first_name'],
+        'lastName': userData['last_name'],
+        'role': userData['role']?.toString() ?? userData['role'],
+        'isActive': userData['is_active'] ?? true,
+      };
+      
+      try {
+        final user = User.fromJson(convertedUserData);
+        return user;
+      } catch (e) {
+        throw Exception('Failed to parse user data: $e. User data: $convertedUserData');
+      }
+    } catch (e) {
+      rethrow;
+    }
   }
 
   Future<void> logout() async {
