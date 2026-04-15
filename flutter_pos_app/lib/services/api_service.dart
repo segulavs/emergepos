@@ -8,7 +8,7 @@ import '../models/product.dart';
 import '../models/transaction.dart';
 
 class ApiService {
-  // Default base URL - Production server on Railway
+  // Default base URL - Production server on Railway kss
   // Can be overridden via SharedPreferences or environment variables
   static const String _defaultProductionUrl = 'https://disciplined-recreation-production.up.railway.app/api';
   
