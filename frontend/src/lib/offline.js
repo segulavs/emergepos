@@ -138,6 +138,9 @@ export const syncIfOnline = async (storeId) => {
 
 // Setup online/offline listeners
 export const setupOfflineListeners = () => {
+  // Sync persisted state with actual browser connectivity on mount
+  useOfflineStore.getState().setOnlineStatus(navigator.onLine);
+
   window.addEventListener('online', () => {
     useOfflineStore.getState().setOnlineStatus(true);
   });
