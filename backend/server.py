@@ -1150,6 +1150,22 @@ async def update_store(
     store = await db.stores.find_one({"id": store_id}, {"_id": 0})
     return deserialize_datetime(store)
 
+@api_router.delete("/stores/{store_id}")
+async def delete_store(
+    store_id: str,
+    user: Dict = Depends(require_role([UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN]))
+):
+    """Soft delete store"""
+    result = await db.stores.update_one(
+        {"id": store_id, "organization_id": user["organization_id"]},
+        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    return {"message": "Store deleted"}
+
 # ==================== WAREHOUSE ROUTES ====================
 
 @api_router.post("/warehouses", response_model=Warehouse)

@@ -43,6 +43,8 @@ export function Stores() {
     longitude: '',
   });
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const canEdit = ['super_admin', 'org_admin'].includes(user?.role);
 
@@ -177,6 +179,21 @@ export function Stores() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await storeAPI.delete(deleteTarget.id);
+      toast.success(`Store "${deleteTarget.name}" deleted`);
+      setDeleteTarget(null);
+      loadStores();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete store');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -233,14 +250,24 @@ export function Stores() {
                 )}
               </div>
               {canEdit && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full mt-4"
-                  onClick={() => openEditDialog(store)}
-                >
-                  Edit Store
-                </Button>
+                <div className="flex gap-2 mt-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => openEditDialog(store)}
+                  >
+                    Edit Store
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => setDeleteTarget(store)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -374,6 +401,31 @@ export function Stores() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Store</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This will deactivate the store. This action can be reversed by an administrator.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
